@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MailDemon Analiz</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>📨 MailDemon</h1>
+  <nav>
+    <a href="index.html">Gelen Kutusu</a>
+    <a href="analiz.html" class="active">Analiz</a>
+    <a href="settings.html">Ayarlar</a>
+  </nav>
+  <div class="status" id="hdr-status"></div>
+</header>
+
+<main>
+  <div class="stats" id="stats"></div>
+
+  <div class="card">
+    <h2>👥 Kim ne istiyor?</h2>
+    <p class="hint">Bir kişiye tıklayarak sadece onun isteklerini görün.</p>
+    <div class="people" id="people"></div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar" style="margin-bottom:8px">
+      <h2 style="margin:0">✅ Açık aksiyonlar</h2>
+      <select id="f-priority">
+        <option value="">Tüm önemler</option>
+        <option value="Critical">Sadece Kritik</option>
+        <option value="High">Yüksek ve üstü</option>
+        <option value="Medium">Orta ve üstü</option>
+      </select>
+      <select id="f-due">
+        <option value="">Tüm son tarihler</option>
+        <option value="urgent">Gecikmiş + bugün</option>
+        <option value="has">Deadline'ı olanlar</option>
+        <option value="none">Deadline'sızlar</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Önem</th><th>Kim</th><th>Ne istiyor</th><th>Deadline</th><th>Mail</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar" style="margin-bottom:8px">
+      <h2 style="margin:0">📋 Özet liste</h2>
+      <button class="small" id="btn-copy">Kopyala</button>
+      <span class="muted" id="copy-msg"></span>
+    </div>
+    <pre class="copy" id="summary"></pre>
+  </div>
+</main>
+
+<script src="common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const PRIO_ORDER = { Critical: 4, High: 3, Medium: 2, Low: 1, Info: 0 };
+let all = [];
+let person = null;
+
+function filtered() {
+  const minP = $("f-priority").value;
+  const due = $("f-due").value;
+  return all.filter(a =>
+    (!person || a.requestedBy === person) &&
+    (!minP || PRIO_ORDER[a.priority] >= PRIO_ORDER[minP]) &&
+    (due === "" ||
+     (due === "urgent" && (a.dueState === "overdue" || a.dueState === "today")) ||
+     (due === "has" && a.dueState !== "none") ||
+     (due === "none" && a.dueState === "none")));
+}
+
+function renderStats() {
+  const count = f => all.filter(f).length;
+  const stats = [
+    ["", all.length, "Açık aksiyon"],
+    ["red", count(a => a.dueState === "overdue"), "Gecikmiş"],
+    ["orange", count(a => a.dueState === "today"), "Bugün son gün"],
+    ["red", count(a => a.priority === "Critical" || a.priority === "High"), "Kritik / Yüksek"],
+    ["", count(a => a.dueState === "none"), "Deadline'sız"],
+  ];
+  $("stats").innerHTML = stats.map(([cls, n, l]) => `<div class="stat ${cls}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderPeople() {
+  const byPerson = {};
+  all.forEach(a => byPerson[a.requestedBy] = (byPerson[a.requestedBy] ?? 0) + 1);
+  const sorted = Object.entries(byPerson).sort((x, y) => y[1] - x[1]);
+  $("people").innerHTML = sorted.length
+    ? `<button class="${person ? "" : "on"}" data-p="">Herkes (${all.length})</button>` +
+      sorted.map(([p, n]) => `<button class="${p === person ? "on" : ""}" data-p="${esc(p)}">${esc(p)} (${n})</button>`).join("")
+    : `<span class="muted">Açık istek yok.</span>`;
+  $("people").querySelectorAll("button").forEach(b => b.onclick = () => { person = b.dataset.p || null; render(); });
+}
+
+function renderTable(items) {
+  $("rows").innerHTML = items.length ? items.map(a => `
+    <tr>
+      <td>${badge(a.priority)}</td>
+      <td><b>${esc(a.requestedBy)}</b></td>
+      <td>${esc(a.description)}${a.fromThread ? ` <span class="tag" title="Mailin altındaki önceki yazışmadan">↩ önceki</span>` : ""}</td>
+      <td>${dueBadge(a, a.dueState)}</td>
+      <td><a href="#" onclick="openInOutlook('${esc(a.mailId)}');return false" title="Outlook'ta aç">${esc(a.subject)}</a></td>
+      <td><button class="small" title="Bu mailin tüm aksiyonlarını tamamlandı işaretle" onclick="done('${esc(a.mailId)}')">✔</button></td>
+    </tr>`).join("") : `<tr><td colspan="6" class="muted">Filtreye uyan aksiyon yok.</td></tr>`;
+}
+
+function renderSummary(items) {
+  // Kişiye göre gruplanmış, kopyalanabilir düz metin
+  const groups = {};
+  items.forEach(a => (groups[a.requestedBy] ??= []).push(a));
+  const lines = [];
+  Object.entries(groups).forEach(([p, list]) => {
+    lines.push(p);
+    list.forEach(a => {
+      const due = a.dueDate ? (a.dueState === "overdue" ? `GECİKTİ (${a.dueDate})` : a.dueDate) : "deadline yok";
+      lines.push(`  • ${a.description} — ${due}`);
+    });
+    lines.push("");
+  });
+  $("summary").textContent = lines.length ? lines.join("\n").trim() : "Açık aksiyon yok.";
+}
+
+function render() {
+  const items = filtered();
+  renderStats();
+  renderPeople();
+  renderTable(items);
+  renderSummary(items);
+}
+
+async function load() {
+  all = await api("GET", "/api/actions");
+  if (person && !all.some(a => a.requestedBy === person)) person = null;
+  render();
+  refreshHeaderStatus();
+}
+
+async function openInOutlook(id) {
+  try { await api("POST", `/api/analyses/${encodeURIComponent(id)}/open`); }
+  catch (e) { alert("Outlook'ta açılamadı: " + e.message); }
+}
+
+async function done(id) {
+  await api("POST", `/api/analyses/${encodeURIComponent(id)}/status`, { status: "Done" });
+  load();
+}
+
+$("f-priority").onchange = render;
+$("f-due").onchange = render;
+$("btn-copy").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($("summary").textContent);
+    $("copy-msg").textContent = "✔ Kopyalandı";
+  } catch {
+    // Pano izni yoksa metni seçili bırak, kullanıcı Ctrl+C yapsın.
+    getSelection().selectAllChildren($("summary"));
+    $("copy-msg").textContent = "Seçildi, Ctrl+C ile kopyalayın";
+  }
+  setTimeout(() => $("copy-msg").textContent = "", 2500);
+};
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
