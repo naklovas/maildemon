@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MailDemon</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>📨 MailDemon</h1>
+  <nav>
+    <a href="index.html" class="active">Gelen Kutusu</a>
+    <a href="settings.html">Ayarlar</a>
+  </nav>
+  <div class="status" id="hdr-status"></div>
+</header>
+
+<main>
+  <div id="banners"></div>
+  <div id="alerts"></div>
+
+  <div class="toolbar">
+    <button id="btn-scan">🔄 Şimdi tara</button>
+    <button id="btn-sound" class="secondary" title="Tarayıcılar ses çalmak için bir tıklama ister">🔔 Sesli alarmı aç</button>
+    <span class="muted">Filtre:</span>
+    <select id="f-priority">
+      <option value="">Tüm önemler</option>
+      <option value="Critical">Sadece Kritik</option>
+      <option value="High">Yüksek ve üstü</option>
+      <option value="Medium">Orta ve üstü</option>
+      <option value="Low">Düşük ve üstü</option>
+    </select>
+    <select id="f-status">
+      <option value="New">Bekleyenler</option>
+      <option value="">Hepsi</option>
+      <option value="Done">Tamamlananlar</option>
+      <option value="Dismissed">Gizlenenler</option>
+    </select>
+    <label class="inline"><input type="checkbox" id="f-mine" checked> Sadece bana hitaben yazılanlar</label>
+  </div>
+
+  <div id="list"></div>
+</main>
+
+<script src="common.js"></script>
+<script>
+let settings = null;
+let audioCtx = null;
+const seenAlerts = new Set();
+let firstAlertLoad = true;
+
+function beep() {
+  if (!audioCtx) return;
+  // Üç kısa "bip" sesi
+  [0, 0.35, 0.7].forEach(t => {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "square";
+    o.frequency.value = 880;
+    g.gain.value = 0.15;
+    o.connect(g).connect(audioCtx.destination);
+    o.start(audioCtx.currentTime + t);
+    o.stop(audioCtx.currentTime + t + 0.2);
+  });
+}
+
+document.getElementById("btn-sound").onclick = async () => {
+  audioCtx = audioCtx || new AudioContext();
+  await audioCtx.resume();
+  beep();
+  if ("Notification" in window && Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+  document.getElementById("btn-sound").textContent = "🔔 Sesli alarm açık";
+  document.getElementById("btn-sound").disabled = true;
+};
+
+document.getElementById("btn-scan").onclick = async () => {
+  await api("POST", "/api/scan");
+  setTimeout(tick, 1500);
+};
+
+["f-priority", "f-status", "f-mine"].forEach(id => document.getElementById(id).onchange = loadList);
+
+async function loadAlerts() {
+  const alerts = await api("GET", "/api/alerts");
+  const box = document.getElementById("alerts");
+  box.innerHTML = alerts.map(a => `
+    <div class="alert-box p-${a.priority}">
+      <div style="font-size:22px">🚨</div>
+      <div class="body"><b>${esc(PRIORITY_TR[a.priority])}: ${esc(a.title.replace(/^\w+: /, ""))}</b>\n${esc(a.message)}
+        <div class="muted" style="color:#fff;opacity:.8;font-size:12px">${fmtDate(a.createdAt)}</div></div>
+      <button class="small" onclick="ack('${a.id}')">Gördüm</button>
+    </div>`).join("");
+
+  const fresh = alerts.filter(a => !seenAlerts.has(a.id));
+  fresh.forEach(a => seenAlerts.add(a.id));
+  if (fresh.length && !firstAlertLoad) {
+    if (settings?.alerts?.playSound) beep();
+    if (settings?.alerts?.browserNotification && "Notification" in window && Notification.permission === "granted") {
+      fresh.forEach(a => new Notification(`🚨 ${PRIORITY_TR[a.priority]}`, { body: a.title.replace(/^\w+: /, "") + "\n" + a.message, requireInteraction: a.priority === "Critical" }));
+    }
+  }
+  firstAlertLoad = false;
+  document.title = alerts.length ? `(${alerts.length}) 🚨 MailDemon` : "MailDemon";
+}
+
+async function ack(id) {
+  await api("POST", `/api/alerts/${encodeURIComponent(id)}/ack`);
+  loadAlerts();
+}
+
+async function setStatus(id, status) {
+  await api("POST", `/api/analyses/${encodeURIComponent(id)}/status`, { status });
+  loadList();
+  loadAlerts();
+}
+
+async function reanalyze(id) {
+  await api("POST", `/api/analyses/${encodeURIComponent(id)}/reanalyze`);
+  loadList();
+}
+
+async function loadList() {
+  const q = new URLSearchParams();
+  const p = document.getElementById("f-priority").value;
+  const s = document.getElementById("f-status").value;
+  if (p) q.set("minPriority", p);
+  if (s) q.set("status", s);
+  if (document.getElementById("f-mine").checked) q.set("onlyMine", "true");
+  const items = await api("GET", "/api/analyses?" + q);
+
+  const list = document.getElementById("list");
+  if (!items.length) {
+    list.innerHTML = `<div class="card muted">Gösterilecek mail yok.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(m => `
+    <div class="card mail p-${m.priority} ${m.status !== "New" ? "done" : ""}">
+      <div class="top">
+        ${badge(m.priority)}
+        <span class="subject">${esc(m.subject)}</span>
+        ${m.addressedToMe ? `<span class="tag">👤 Bana hitaben</span>` : ""}
+        <span class="tag">${ROLE_TR[m.recipientRole] ?? m.recipientRole}</span>
+      </div>
+      <div class="meta">${esc(m.fromName)} &lt;${esc(m.fromEmail)}&gt; · ${fmtDate(m.receivedAt)}</div>
+      ${m.summary ? `<div>${esc(m.summary)}</div>` : ""}
+      ${m.requests?.length ? `<b style="display:block;margin-top:8px">İstenenler:</b><ul>${m.requests.map(r =>
+        `<li>${esc(r.description)}${r.dueDate ? ` <span class="tag">⏰ ${esc(r.dueDate)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+      ${m.reason ? `<div class="reason">Gerekçe: ${esc(m.reason)}</div>` : ""}
+      ${m.matchedRules?.length ? `<div style="margin-top:4px">${m.matchedRules.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>` : ""}
+      ${m.aiNote ? `<div class="reason">ℹ️ ${esc(m.aiNote)}</div>` : ""}
+      <div class="actions">
+        ${m.webLink ? `<a class="btn" style="text-decoration:none;font-size:12px;padding:3px 9px" href="${esc(m.webLink)}" target="_blank" rel="noopener">Outlook'ta aç</a>` : ""}
+        ${m.status === "New"
+          ? `<button class="small" onclick="setStatus('${esc(m.id)}','Done')">✔ Tamamlandı</button>
+             <button class="small secondary" onclick="setStatus('${esc(m.id)}','Dismissed')">Gizle</button>`
+          : `<button class="small secondary" onclick="setStatus('${esc(m.id)}','New')">Geri al</button>`}
+        <button class="small secondary" onclick="reanalyze('${esc(m.id)}')" title="Ayarları değiştirdikten sonra bu maili tekrar değerlendir">↻ Yeniden analiz</button>
+      </div>
+    </div>`).join("");
+}
+
+async function tick() {
+  const st = await refreshHeaderStatus();
+  const banners = [];
+  if (st?.deviceCodeMessage) banners.push(`<div class="banner info">🔑 <b>Outlook girişi gerekiyor:</b> ${esc(st.deviceCodeMessage)}</div>`);
+  if (st?.lastError) banners.push(`<div class="banner error">⚠️ Son tarama hatası: ${esc(st.lastError)}</div>`);
+  (st?.warnings ?? []).forEach(w => banners.push(`<div class="banner warn">${esc(w)} <a href="settings.html">Ayarlara git</a></div>`));
+  document.getElementById("banners").innerHTML = banners.join("");
+  await loadAlerts();
+  await loadList();
+}
+
+(async () => {
+  settings = await api("GET", "/api/settings");
+  await tick();
+  setInterval(tick, 15000);
+})();
+</script>
+</body>
+</html>

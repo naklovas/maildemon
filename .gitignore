@@ -1,0 +1,6 @@
+bin/
+obj/
+.vs/
+*.user
+# Ayarlar, API anahtarları, Outlook oturumu ve analiz sonuçları burada tutulur
+data/

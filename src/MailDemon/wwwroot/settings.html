@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MailDemon Ayarlar</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>📨 MailDemon</h1>
+  <nav>
+    <a href="index.html">Gelen Kutusu</a>
+    <a href="settings.html" class="active">Ayarlar</a>
+  </nav>
+  <div class="status" id="hdr-status"></div>
+</header>
+
+<main>
+  <div class="card">
+    <h2>👤 Kimliğim</h2>
+    <p class="hint">Mailin size hitaben yazılıp yazılmadığını anlamak için kullanılır.</p>
+    <div class="grid2">
+      <div><label>Ad Soyad</label><input type="text" id="me-name" placeholder="Ahmet Yılmaz"></div>
+      <div><label>Unvan</label><input type="text" id="me-title" placeholder="Bilgi İşlem Müdürü"></div>
+    </div>
+    <div class="grid2">
+      <div><label>E-posta adreslerim (her satıra bir tane)</label><textarea id="me-emails" placeholder="ahmet.yilmaz@firma.com&#10;ayilmaz@firma.com.tr"></textarea></div>
+      <div><label>Hitap şekilleri (her satıra bir tane)</label><textarea id="me-names" placeholder="Ahmet Bey&#10;Ahmet&#10;Sayın Yılmaz"></textarea></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>⭐ Önemli kişiler</h2>
+    <p class="hint">Bu kişilerden gelen mailler en az seçilen önemde değerlendirilir. Alan adı için <code>*@firma.com</code> yazabilirsiniz.</p>
+    <table>
+      <thead><tr><th>Ad</th><th>E-posta / desen</th><th>Unvan</th><th>Minimum önem</th><th title="Sadece TO alanındaysam bu önem; CC'de bir seviye düşer">Sadece TO</th><th>Not</th><th></th></tr></thead>
+      <tbody id="vip-rows"></tbody>
+    </table>
+    <button class="secondary small" style="margin-top:8px" onclick="addVip()">+ Kişi ekle</button>
+  </div>
+
+  <div class="card">
+    <h2>🔑 Anahtar kelime kuralları</h2>
+    <p class="hint">Konu veya gövdede geçen kelimeye göre minimum önem. Büyük/küçük harf duyarsızdır.</p>
+    <table>
+      <thead><tr><th>Kelime / ifade</th><th>Nerede</th><th>Minimum önem</th><th></th></tr></thead>
+      <tbody id="kw-rows"></tbody>
+    </table>
+    <button class="secondary small" style="margin-top:8px" onclick="addKw()">+ Kural ekle</button>
+  </div>
+
+  <div class="card">
+    <h2>🚫 Yok sayılan göndericiler</h2>
+    <p class="hint">Bu göndericilerin mailleri hiç değerlendirilmez. Her satıra bir adres veya desen (<code>*@newsletter.com</code>, <code>noreply@*</code>).</p>
+    <textarea id="ignored"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>🤖 AI yorumlama (Claude)</h2>
+    <p class="hint">Mailler özet, istekler ve önem derecesi için Anthropic Claude API'ye gönderilir.</p>
+    <label class="inline"><input type="checkbox" id="ai-enabled"> AI yorumlama açık</label>
+    <div class="grid3">
+      <div><label>API anahtarı</label><input type="password" id="ai-key" placeholder="Boşsa ANTHROPIC_API_KEY kullanılır"></div>
+      <div><label>Model</label>
+        <select id="ai-model">
+          <option value="claude-opus-5-5">Claude Opus 5.5 (önerilen)</option>
+          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (daha ucuz)</option>
+          <option value="claude-haiku-5-5">Claude Haiku 5.5 (en ucuz, hızlı)</option>
+        </select>
+      </div>
+      <div><label>Düşünme seviyesi</label>
+        <select id="ai-effort">
+          <option value="low">Düşük (hızlı)</option>
+          <option value="medium">Orta</option>
+          <option value="high">Yüksek (dikkatli)</option>
+        </select>
+      </div>
+    </div>
+    <label>Ek kriterler / talimatlar</label>
+    <textarea id="ai-extra" placeholder="Örn:&#10;- Müşteri şikayetleri en az Yüksek olsun.&#10;- Fatura/ödeme onayı istenen mailler Kritik.&#10;- Toplantı davetleri Düşük."></textarea>
+    <div class="grid3">
+      <div><label>Gövde karakter sınırı</label><input type="number" id="ai-maxchars"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>⏱ Tarama</h2>
+    <label class="inline"><input type="checkbox" id="scan-enabled"> Otomatik tarama açık</label>
+    <label class="inline"><input type="checkbox" id="scan-unread"> Sadece okunmamışlar</label>
+    <label class="inline"><input type="checkbox" id="scan-cc"> CC'de olduğum mailleri de değerlendir</label>
+    <label class="inline"><input type="checkbox" id="scan-skip"> Alıcılarda olmadığım ve kural eşleşmeyen mailleri AI'a gönderme</label>
+    <div class="grid3">
+      <div><label>Tarama aralığı (dakika)</label><input type="number" id="scan-interval" min="1"></div>
+      <div><label>Geriye dönük (saat)</label><input type="number" id="scan-lookback" min="1"></div>
+      <div><label>Tarama başına en fazla mail</label><input type="number" id="scan-max" min="1"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>🚨 Alarm</h2>
+    <div class="grid3">
+      <div><label>Bu önem ve üstü için alarm ver</label><select id="al-min"></select></div>
+      <div style="padding-top:28px">
+        <label class="inline"><input type="checkbox" id="al-sound"> Sesli uyarı</label>
+        <label class="inline"><input type="checkbox" id="al-notify"> Masaüstü bildirimi</label>
+      </div>
+    </div>
+    <label>Teams / Slack webhook adresi (opsiyonel)</label>
+    <input type="text" id="al-webhook" placeholder="https://...">
+  </div>
+
+  <div class="card">
+    <h2>📬 Outlook bağlantısı</h2>
+    <p class="hint">Azure portalında bir "App registration" oluşturup Client ID'yi buraya girin. Kurulum adımları README'de.</p>
+    <div class="grid3">
+      <div><label>Giriş yöntemi</label>
+        <select id="mb-mode">
+          <option value="DeviceCode">Kendi hesabımla giriş (cihaz kodu)</option>
+          <option value="ClientSecret">Uygulama izni (client secret)</option>
+        </select>
+      </div>
+      <div><label>Tenant ID</label><input type="text" id="mb-tenant" placeholder="common"></div>
+      <div><label>Client ID</label><input type="text" id="mb-client"></div>
+    </div>
+    <div class="grid3" id="mb-secret-row">
+      <div><label>Client secret</label><input type="password" id="mb-secret"></div>
+      <div><label>Posta kutusu adresi</label><input type="email" id="mb-user"></div>
+    </div>
+    <div class="grid3">
+      <div><label>Klasör</label><input type="text" id="mb-folder" placeholder="inbox"></div>
+    </div>
+    <button class="secondary small" style="margin-top:10px" onclick="signOut()">Outlook oturumunu kapat</button>
+  </div>
+
+  <div class="sticky-save">
+    <button onclick="save()">💾 Kaydet</button>
+    <span id="save-msg" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <h2>🧪 Kuralları test et</h2>
+    <p class="hint">Outlook'a bağlanmadan örnek bir maili mevcut (kaydedilmiş) ayarlarla değerlendirin.</p>
+    <div class="grid2">
+      <div><label>Gönderen adı</label><input type="text" id="t-fromname" value="Mehmet Demir"></div>
+      <div><label>Gönderen e-posta</label><input type="text" id="t-from" value="gm@firma.com"></div>
+      <div><label>Kime (virgülle)</label><input type="text" id="t-to"></div>
+      <div><label>Bilgi / CC (virgülle)</label><input type="text" id="t-cc"></div>
+    </div>
+    <label>Konu</label><input type="text" id="t-subject" value="Yarınki yönetim kurulu sunumu">
+    <label>Gövde</label>
+    <textarea id="t-body" style="min-height:120px">Ahmet Bey merhaba,
+
+Yarın saat 10:00'daki yönetim kurulu toplantısı için BT bütçe sunumunu bu akşam 18:00'e kadar bana iletebilir misiniz? Ayrıca geçen ayki kesinti raporunu da eklerseniz sevinirim.
+
+Teşekkürler,
+Mehmet Demir
+Genel Müdür</textarea>
+    <button style="margin-top:10px" id="t-run" onclick="runTest()">Analiz et</button>
+    <div id="t-result" style="margin-top:12px"></div>
+  </div>
+</main>
+
+<script src="common.js"></script>
+<script>
+let S = null;
+const $ = id => document.getElementById(id);
+const lines = s => s.split("\n").map(x => x.trim()).filter(Boolean);
+
+function vipRow(v = { name: "", email: "", title: "", priority: "Critical", onlyWhenDirect: false, note: "" }) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" data-k="name" value="${esc(v.name)}" placeholder="Mehmet Demir"></td>
+    <td><input type="text" data-k="email" value="${esc(v.email)}" placeholder="gm@firma.com"></td>
+    <td><input type="text" data-k="title" value="${esc(v.title)}" placeholder="Genel Müdür"></td>
+    <td><select data-k="priority">${priorityOptions(v.priority)}</select></td>
+    <td style="text-align:center"><input type="checkbox" data-k="onlyWhenDirect" ${v.onlyWhenDirect ? "checked" : ""}></td>
+    <td><input type="text" data-k="note" value="${esc(v.note)}"></td>
+    <td><button class="small danger" onclick="this.closest('tr').remove()">Sil</button></td>`;
+  $("vip-rows").appendChild(tr);
+}
+function addVip() { vipRow(); }
+
+function kwRow(k = { keyword: "", scope: "SubjectOrBody", priority: "High" }) {
+  const tr = document.createElement("tr");
+  const scopes = { SubjectOrBody: "Konu veya gövde", Subject: "Sadece konu", Body: "Sadece gövde" };
+  tr.innerHTML = `
+    <td><input type="text" data-k="keyword" value="${esc(k.keyword)}" placeholder="acil"></td>
+    <td><select data-k="scope">${Object.entries(scopes).map(([v, t]) => `<option value="${v}" ${v === k.scope ? "selected" : ""}>${t}</option>`).join("")}</select></td>
+    <td><select data-k="priority">${priorityOptions(k.priority)}</select></td>
+    <td><button class="small danger" onclick="this.closest('tr').remove()">Sil</button></td>`;
+  $("kw-rows").appendChild(tr);
+}
+function addKw() { kwRow(); }
+
+function readRows(tbodyId) {
+  return [...$(tbodyId).querySelectorAll("tr")].map(tr => {
+    const o = {};
+    tr.querySelectorAll("[data-k]").forEach(el => o[el.dataset.k] = el.type === "checkbox" ? el.checked : el.value.trim());
+    return o;
+  });
+}
+
+function fill() {
+  $("me-name").value = S.me.displayName;
+  $("me-title").value = S.me.title;
+  $("me-emails").value = S.me.emails.join("\n");
+  $("me-names").value = S.me.nameVariants.join("\n");
+
+  $("vip-rows").innerHTML = "";
+  S.vipSenders.forEach(vipRow);
+  $("kw-rows").innerHTML = "";
+  S.keywordRules.forEach(kwRow);
+  $("ignored").value = S.ignoredSenders.join("\n");
+
+  $("ai-enabled").checked = S.ai.enabled;
+  $("ai-key").value = S.ai.apiKey;
+  $("ai-model").value = S.ai.model;
+  if ($("ai-model").value !== S.ai.model) {
+    $("ai-model").insertAdjacentHTML("beforeend", `<option value="${esc(S.ai.model)}">${esc(S.ai.model)}</option>`);
+    $("ai-model").value = S.ai.model;
+  }
+  $("ai-effort").value = S.ai.effort;
+  $("ai-extra").value = S.ai.extraInstructions;
+  $("ai-maxchars").value = S.ai.maxBodyChars;
+
+  $("scan-enabled").checked = S.scan.enabled;
+  $("scan-unread").checked = S.scan.onlyUnread;
+  $("scan-cc").checked = S.scan.includeCc;
+  $("scan-skip").checked = S.scan.skipIrrelevant;
+  $("scan-interval").value = S.scan.intervalMinutes;
+  $("scan-lookback").value = S.scan.lookbackHours;
+  $("scan-max").value = S.scan.maxMailsPerScan;
+
+  $("al-min").innerHTML = priorityOptions(S.alerts.minPriority);
+  $("al-sound").checked = S.alerts.playSound;
+  $("al-notify").checked = S.alerts.browserNotification;
+  $("al-webhook").value = S.alerts.webhookUrl;
+
+  $("mb-mode").value = S.mailbox.authMode;
+  $("mb-tenant").value = S.mailbox.tenantId;
+  $("mb-client").value = S.mailbox.clientId;
+  $("mb-secret").value = S.mailbox.clientSecret;
+  $("mb-user").value = S.mailbox.userEmail;
+  $("mb-folder").value = S.mailbox.folder;
+  toggleSecret();
+}
+
+function toggleSecret() {
+  $("mb-secret-row").style.display = $("mb-mode").value === "ClientSecret" ? "" : "none";
+}
+$("mb-mode").onchange = toggleSecret;
+
+function collect() {
+  return {
+    me: {
+      displayName: $("me-name").value.trim(),
+      title: $("me-title").value.trim(),
+      emails: lines($("me-emails").value),
+      nameVariants: lines($("me-names").value),
+    },
+    vipSenders: readRows("vip-rows").filter(v => v.email),
+    keywordRules: readRows("kw-rows").filter(k => k.keyword),
+    ignoredSenders: lines($("ignored").value),
+    ai: {
+      enabled: $("ai-enabled").checked,
+      apiKey: $("ai-key").value.trim(),
+      model: $("ai-model").value,
+      effort: $("ai-effort").value,
+      extraInstructions: $("ai-extra").value,
+      maxBodyChars: +$("ai-maxchars").value || 12000,
+    },
+    scan: {
+      enabled: $("scan-enabled").checked,
+      onlyUnread: $("scan-unread").checked,
+      includeCc: $("scan-cc").checked,
+      skipIrrelevant: $("scan-skip").checked,
+      intervalMinutes: +$("scan-interval").value || 5,
+      lookbackHours: +$("scan-lookback").value || 24,
+      maxMailsPerScan: +$("scan-max").value || 25,
+    },
+    alerts: {
+      minPriority: $("al-min").value,
+      playSound: $("al-sound").checked,
+      browserNotification: $("al-notify").checked,
+      webhookUrl: $("al-webhook").value.trim(),
+    },
+    mailbox: {
+      authMode: $("mb-mode").value,
+      tenantId: $("mb-tenant").value.trim() || "common",
+      clientId: $("mb-client").value.trim(),
+      clientSecret: $("mb-secret").value.trim(),
+      userEmail: $("mb-user").value.trim(),
+      folder: $("mb-folder").value.trim() || "inbox",
+    },
+  };
+}
+
+async function save() {
+  try {
+    await api("PUT", "/api/settings", collect());
+    $("save-msg").textContent = "✔ Kaydedildi " + new Date().toLocaleTimeString("tr-TR");
+    S = await api("GET", "/api/settings");
+  } catch (e) {
+    $("save-msg").textContent = "Hata: " + e.message;
+  }
+}
+
+async function signOut() {
+  if (!confirm("Outlook oturumu kapatılsın mı? Sonraki taramada yeniden giriş istenir.")) return;
+  await api("POST", "/api/outlook/signout");
+  refreshHeaderStatus();
+}
+
+async function runTest() {
+  $("t-run").disabled = true;
+  $("t-result").innerHTML = `<span class="muted">Analiz ediliyor…</span>`;
+  try {
+    const r = await api("POST", "/api/test-analyze", {
+      fromName: $("t-fromname").value, fromEmail: $("t-from").value,
+      to: $("t-to").value || (S.me.emails[0] ?? ""), cc: $("t-cc").value,
+      subject: $("t-subject").value, body: $("t-body").value,
+    });
+    if (r.ignored) { $("t-result").innerHTML = `<div class="banner warn">Gönderici yok sayılanlar listesinde.</div>`; return; }
+    $("t-result").innerHTML = `
+      <div class="card mail p-${r.priority}">
+        <div class="top">${badge(r.priority)} <b>${r.addressedToMe ? "👤 Size hitaben" : "Size hitaben değil"}</b>
+          <span class="tag">Kural: ${PRIORITY_TR[r.rulePriority]}</span>
+          ${r.aiPriority ? `<span class="tag">AI: ${PRIORITY_TR[r.aiPriority]}</span>` : ""}</div>
+        ${r.summary ? `<p>${esc(r.summary)}</p>` : ""}
+        ${r.requests?.length ? `<b>İstenenler:</b><ul>${r.requests.map(x => `<li>${esc(x.description)}${x.dueDate ? ` <span class="tag">⏰ ${esc(x.dueDate)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+        ${r.reason ? `<div class="reason">Gerekçe: ${esc(r.reason)}</div>` : ""}
+        ${r.matchedRules?.length ? `<div>${r.matchedRules.map(x => `<span class="tag">${esc(x)}</span>`).join("")}</div>` : ""}
+        ${r.aiNote ? `<div class="reason">ℹ️ ${esc(r.aiNote)}</div>` : ""}
+      </div>`;
+  } catch (e) {
+    $("t-result").innerHTML = `<div class="banner error">${esc(e.message)}</div>`;
+  } finally {
+    $("t-run").disabled = false;
+  }
+}
+
+(async () => {
+  S = await api("GET", "/api/settings");
+  fill();
+  refreshHeaderStatus();
+})();
+</script>
+</body>
+</html>
