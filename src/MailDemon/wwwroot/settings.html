@@ -11,6 +11,7 @@
   <h1>📨 MailDemon</h1>
   <nav>
     <a href="index.html">Gelen Kutusu</a>
+    <a href="analiz.html">Analiz</a>
     <a href="settings.html" class="active">Ayarlar</a>
   </nav>
   <div class="status" id="hdr-status"></div>
@@ -311,7 +312,7 @@ async function runTest() {
           <span class="tag">Kural: ${PRIORITY_TR[r.rulePriority]}</span>
           ${r.aiPriority ? `<span class="tag">AI: ${PRIORITY_TR[r.aiPriority]}</span>` : ""}</div>
         ${r.summary ? `<p>${esc(r.summary)}</p>` : ""}
-        ${r.requests?.length ? `<b>İstenenler:</b><ul>${r.requests.map(x => `<li>${esc(x.description)}${x.dueDate ? ` <span class="tag">⏰ ${esc(x.dueDate)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+        ${actionList(r.requests, r.fromName)}
         ${r.reason ? `<div class="reason">Gerekçe: ${esc(r.reason)}</div>` : ""}
         ${r.matchedRules?.length ? `<div>${r.matchedRules.map(x => `<span class="tag">${esc(x)}</span>`).join("")}</div>` : ""}
         ${r.aiNote ? `<div class="reason">ℹ️ ${esc(r.aiNote)}</div>` : ""}

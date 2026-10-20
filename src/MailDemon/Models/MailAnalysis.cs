@@ -38,10 +38,20 @@ public class MailItem
 /// <summary>Bir mailden istenen tek bir iş.</summary>
 public class MailRequest
 {
+    /// <summary>İsteyen kişi (yazışmanın içinden; boşsa maili gönderen kabul edilir).</summary>
+    public string RequestedBy { get; set; } = "";
+
+    /// <summary>Kısa, emir kipinde iş tanımı: "BT bütçe sunumunu gönder".</summary>
     public string Description { get; set; } = "";
 
-    /// <summary>Mailde belirtilen veya çıkarılan son tarih (serbest metin, ör. "Cuma 17:00").</summary>
+    /// <summary>Mailde yazdığı haliyle son tarih (ör. "Cuma 17:00"); yoksa null.</summary>
     public string? DueDate { get; set; }
+
+    /// <summary>Son tarihin takvim karşılığı (yyyy-MM-dd); sıralama ve "gecikti/bugün" için.</summary>
+    public string? DueDateIso { get; set; }
+
+    /// <summary>İstek mailin altındaki önceki yazışmadan geliyorsa true.</summary>
+    public bool FromThread { get; set; }
 }
 
 /// <summary>Kural motoru + AI yorumunun birleşmiş sonucu.</summary>

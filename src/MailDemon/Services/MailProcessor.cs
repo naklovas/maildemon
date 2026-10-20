@@ -68,6 +68,8 @@ public class MailProcessor(
                 analysis.AddressedToMe = verdict.AddressedToMe;
                 analysis.Summary = verdict.Summary;
                 analysis.Requests = verdict.Requests;
+                foreach (var r in analysis.Requests.Where(r => string.IsNullOrWhiteSpace(r.RequestedBy)))
+                    r.RequestedBy = mail.FromName;
                 analysis.Reason = verdict.Reason;
                 analysis.AiPriority = verdict.Priority;
                 // Kurallar taban (minimum) belirler; AI daha yüksek bulursa onu kullan.
@@ -104,7 +106,7 @@ public class MailProcessor(
         try
         {
             var requests = a.Requests.Count == 0 ? "" :
-                "\nİstenenler:\n" + string.Join("\n", a.Requests.Select(r => $"• {r.Description}{(r.DueDate is null ? "" : $" (son: {r.DueDate})")}"));
+                "\nİstenenler:\n" + string.Join("\n", a.Requests.Select(r => $"• {r.RequestedBy}: {r.Description} — {(r.DueDate is null ? "deadline yok" : $"son: {r.DueDate}")}"));
             var text = $"🚨 [{a.Priority}] {a.Subject}\nGönderen: {a.FromName} <{a.FromEmail}>\n{a.Summary}{requests}";
             using var http = httpFactory.CreateClient();
             var resp = await http.PostAsJsonAsync(s.Alerts.WebhookUrl, new { text }, ct);

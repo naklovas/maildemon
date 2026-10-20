@@ -114,6 +114,35 @@ app.MapPost("/api/analyses/{id}/reanalyze", (string id, AnalysisStore store, Sca
     return Results.Accepted();
 });
 
+// ---- Aksiyon listesi (Analiz sayfası) ----
+
+app.MapGet("/api/actions", (AnalysisStore store) =>
+{
+    var today = DateOnly.FromDateTime(DateTime.Now);
+    var actions = store.Query(st => st.Analyses
+        .Where(a => a.Status == AnalysisStatus.New && a.AddressedToMe)
+        .SelectMany(a => a.Requests.Select(r => new ActionItem(
+            MailId: a.Id,
+            Subject: a.Subject,
+            Priority: a.Priority,
+            ReceivedAt: a.ReceivedAt,
+            RequestedBy: string.IsNullOrWhiteSpace(r.RequestedBy) ? a.FromName : r.RequestedBy,
+            Description: r.Description,
+            DueDate: r.DueDate,
+            DueDateIso: r.DueDateIso,
+            FromThread: r.FromThread,
+            DueState: DueState(r.DueDateIso, r.DueDate, today))))
+        .ToList());
+
+    // Önce gecikmiş/bugün, sonra önem, sonra en yakın son tarih.
+    return actions
+        .OrderBy(x => x.DueState switch { "overdue" => 0, "today" => 1, "upcoming" => 2, _ => 3 })
+        .ThenByDescending(x => x.Priority)
+        .ThenBy(x => x.DueDateIso ?? "9999")
+        .ThenByDescending(x => x.ReceivedAt)
+        .ToList();
+});
+
 // ---- Alarmlar ----
 
 app.MapGet("/api/alerts", (AnalysisStore store) =>
@@ -154,6 +183,18 @@ app.Run();
 static List<string> Split(string? s) =>
     (s ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
+static string DueState(string? iso, string? text, DateOnly today)
+{
+    if (iso is not null && DateOnly.TryParse(iso, out var due))
+        return due < today ? "overdue" : due == today ? "today" : "upcoming";
+    // Tarihe çevrilemeyen ama yazılmış bir son tarih (ör. "en kısa sürede") yine de deadline sayılır.
+    return string.IsNullOrWhiteSpace(text) ? "none" : "upcoming";
+}
+
 record StatusChange(AnalysisStatus Status);
+
+record ActionItem(
+    string MailId, string Subject, Priority Priority, DateTimeOffset ReceivedAt,
+    string RequestedBy, string Description, string? DueDate, string? DueDateIso, bool FromThread, string DueState);
 
 record TestMail(string FromName, string FromEmail, string? To, string? Cc, string Subject, string Body);

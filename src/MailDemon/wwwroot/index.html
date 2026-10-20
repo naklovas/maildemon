@@ -11,6 +11,7 @@
   <h1>📨 MailDemon</h1>
   <nav>
     <a href="index.html" class="active">Gelen Kutusu</a>
+    <a href="analiz.html">Analiz</a>
     <a href="settings.html">Ayarlar</a>
   </nav>
   <div class="status" id="hdr-status"></div>
@@ -154,8 +155,7 @@ async function loadList() {
       </div>
       <div class="meta">${esc(m.fromName)} &lt;${esc(m.fromEmail)}&gt; · ${fmtDate(m.receivedAt)}</div>
       ${m.summary ? `<div>${esc(m.summary)}</div>` : ""}
-      ${m.requests?.length ? `<b style="display:block;margin-top:8px">İstenenler:</b><ul>${m.requests.map(r =>
-        `<li>${esc(r.description)}${r.dueDate ? ` <span class="tag">⏰ ${esc(r.dueDate)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+      ${actionList(m.requests, m.fromName)}
       ${m.reason ? `<div class="reason">Gerekçe: ${esc(m.reason)}</div>` : ""}
       ${m.matchedRules?.length ? `<div style="margin-top:4px">${m.matchedRules.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>` : ""}
       ${m.aiNote ? `<div class="reason">ℹ️ ${esc(m.aiNote)}</div>` : ""}

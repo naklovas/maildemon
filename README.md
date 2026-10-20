@@ -6,6 +6,8 @@ Bilgisayarınızdaki **Outlook masaüstü uygulamasının** gelen kutusunu düze
 - **Sizden ne isteniyor?** Her iş ayrı madde olarak, son tarihiyle birlikte
 - **Önem derecesi:** Kritik / Yüksek / Orta / Düşük / Bilgi, gerekçesiyle birlikte
 
+Her mail için kısa bir **aksiyon listesi** çıkar: *kim → ne istiyor → deadline var mı*. Mailin altındaki önceki yazışma da okunur; daha önce istenip hâlâ açık olan işler "↩ önceki yazışma" etiketiyle listeye girer. **Analiz** sayfası tüm açık aksiyonları tek tabloda gösterir: önce gecikmiş ve bugün son günü olanlar, kişiye göre filtre ve kopyalanabilir özet liste.
+
 Önemli kişileri (ör. Genel Müdür → **Kritik**) ve anahtar kelime kurallarını web arayüzünden tanımlarsınız. Bu kurallar **minimum** önemi belirler. AI daha yüksek bir önem bulursa onun kararı geçer. Belirlediğiniz seviyedeki mailler için ekranda yanıp sönen bir alarm, sesli uyarı ve masaüstü bildirimi çıkar. İsterseniz Teams veya Slack'e de mesaj gönderilir.
 
 ## Nasıl çalışır?
@@ -100,7 +102,7 @@ src/MailDemon/
 │   ├── MailProcessor.cs    # Kural + AI birleşimi, alarm, webhook
 │   ├── ScanWorker.cs       # Arka planda periyodik tarama
 │   └── Stores.cs           # JSON dosya tabanlı saklama
-└── wwwroot/                # index.html (gelen kutusu + alarmlar), settings.html
+└── wwwroot/                # index.html (gelen kutusu + alarmlar), analiz.html (aksiyon listesi), settings.html
 ```
 
 ## Geliştirme fikirleri
