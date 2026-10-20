@@ -14,7 +14,26 @@ public class MailProcessor(
     public async Task<MailAnalysis?> ProcessAsync(MailItem mail, AppSettings s, bool save, CancellationToken ct)
     {
         var rules = RuleEngine.Evaluate(mail, s);
-        if (rules.Ignored) return null;
+        if (rules.Ignored)
+        {
+            // Kaydedilir ki her taramada tekrar okunup sınırı doldurmasın; arayüzde "Gizlenenler"de görünür.
+            if (save)
+            {
+                store.Add(new MailAnalysis
+                {
+                    Id = mail.Id,
+                    Subject = mail.Subject,
+                    FromName = mail.FromName,
+                    FromEmail = mail.FromEmail,
+                    ReceivedAt = mail.ReceivedAt,
+                    MatchedRules = rules.Matched,
+                    Status = AnalysisStatus.Dismissed,
+                    AnalyzedAt = DateTimeOffset.UtcNow,
+                    AiNote = "Yok sayılan gönderici.",
+                }, null);
+            }
+            return null;
+        }
 
         var analysis = new MailAnalysis
         {

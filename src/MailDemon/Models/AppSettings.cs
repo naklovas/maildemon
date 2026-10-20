@@ -75,7 +75,7 @@ public class ScanSettings
     /// <summary>İlk taramada ve her taramada geriye dönük kaç saat bakılacağı.</summary>
     public int LookbackHours { get; set; } = 24;
 
-    public int MaxMailsPerScan { get; set; } = 25;
+    public int MaxMailsPerScan { get; set; } = 50;
     public bool OnlyUnread { get; set; } = false;
 
     /// <summary>Bilgi (CC) olarak eklendiğim mailleri de değerlendir.</summary>

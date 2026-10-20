@@ -20,7 +20,12 @@ public class OutlookClient(ILogger<OutlookClient> logger)
 
     public string? SignedInAs { get; private set; }
 
-    public Task<List<MailItem>> GetRecentMailsAsync(AppSettings s, DateTimeOffset since, CancellationToken ct) =>
+    /// <summary>
+    /// <paramref name="since"/> sonrasındaki mailleri yeniden eskiye okur. Daha önce işlenmiş olanlar
+    /// (<paramref name="isKnown"/>) atlanır ve MaxMailsPerScan sınırına sayılmaz; böylece yoğun günlerde
+    /// eski mailler sonraki taramalarda sırayla yakalanır.
+    /// </summary>
+    public Task<List<MailItem>> GetRecentMailsAsync(AppSettings s, DateTimeOffset since, Func<string, bool> isKnown, CancellationToken ct) =>
         RunSta(() =>
         {
             var ns = GetNamespace();
@@ -40,7 +45,7 @@ public class OutlookClient(ILogger<OutlookClient> logger)
                     {
                         var received = new DateTimeOffset((DateTime)item.ReceivedTime);
                         if (received < since) break;
-                        if (!s.Scan.OnlyUnread || (bool)item.UnRead)
+                        if (!isKnown((string)item.EntryID) && (!s.Scan.OnlyUnread || (bool)item.UnRead))
                             result.Add(ToMailItem(item, received));
                     }
                 }

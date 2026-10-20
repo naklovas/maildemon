@@ -48,15 +48,15 @@ public class ScanWorker(
         {
             var s = settings.Read();
             var since = DateTimeOffset.UtcNow.AddHours(-Math.Max(1, s.Scan.LookbackHours));
-            var mails = await outlook.GetRecentMailsAsync(s, since, ct);
+            var mails = await outlook.GetRecentMailsAsync(s, since, store.Contains, ct);
 
             // Outlook'taki hesap adreslerim kimlik ayarlarına girilmemiş olsa da "bana mı" kontrolünde kullanılsın.
             foreach (var email in outlook.DetectedEmails)
                 if (!s.Me.Emails.Contains(email, StringComparer.OrdinalIgnoreCase))
                     s.Me.Emails.Add(email);
 
-            var newMails = mails.Where(m => !store.Contains(m.Id)).OrderBy(m => m.ReceivedAt).ToList();
-            logger.LogInformation("{Total} mail bulundu, {New} yeni", mails.Count, newMails.Count);
+            var newMails = mails.OrderBy(m => m.ReceivedAt).ToList();
+            logger.LogInformation("{New} yeni mail bulundu", newMails.Count);
 
             foreach (var mail in newMails)
             {
@@ -66,6 +66,9 @@ public class ScanWorker(
 
             store.Update(st => st.LastScanAt = DateTimeOffset.UtcNow);
             LastError = null;
+
+            // Sınır dolduysa geride bekleyen mailler olabilir; aralığı beklemeden bir tur daha tara.
+            if (mails.Count >= s.Scan.MaxMailsPerScan) TriggerNow();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
