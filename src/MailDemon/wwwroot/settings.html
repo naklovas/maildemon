@@ -60,6 +60,7 @@
     <h2>🤖 AI yorumlama</h2>
     <p class="hint">Şirket içi, OpenAI uyumlu (<code>/v1/chat/completions</code>) AI servisi. Mailler sadece bu adrese gönderilir.</p>
     <label class="inline"><input type="checkbox" id="ai-enabled"> AI yorumlama açık</label>
+    <label class="inline" title="Düşünen modellerde (Qwen3, vLLM reasoning vb.) düşünme bölümünü kapatır; cevap hızlanır ve token sınırına takılmaz"><input type="checkbox" id="ai-nothink"> Model düşünmesini kapat (önerilen)</label>
     <div class="grid2">
       <div><label>Servis adresi (Base URL)</label><input type="text" id="ai-url" placeholder="https://ai.firma.local/v1"></div>
       <div><label>Model adı</label><input type="text" id="ai-model" placeholder="gpt-4o, llama-3.3-70b, qwen2.5…"></div>
@@ -215,6 +216,7 @@ function fill() {
   $("ai-json").value = S.ai.jsonMode;
   $("ai-temp").value = S.ai.temperature ?? "";
   $("ai-maxtokens").value = S.ai.maxTokens;
+  $("ai-nothink").checked = S.ai.disableThinking;
   $("ai-timeout").value = S.ai.timeoutSeconds;
   $("ai-extra").value = S.ai.extraInstructions;
   $("ai-maxchars").value = S.ai.maxBodyChars;
@@ -255,7 +257,8 @@ function collect() {
       model: $("ai-model").value.trim(),
       jsonMode: $("ai-json").value,
       temperature: $("ai-temp").value === "" ? null : +$("ai-temp").value,
-      maxTokens: +$("ai-maxtokens").value || 2000,
+      maxTokens: +$("ai-maxtokens").value || 4000,
+      disableThinking: $("ai-nothink").checked,
       timeoutSeconds: +$("ai-timeout").value || 120,
       extraInstructions: $("ai-extra").value,
       maxBodyChars: +$("ai-maxchars").value || 12000,

@@ -89,7 +89,48 @@ public class AiAnalyzer(IHttpClientFactory httpFactory, ILogger<AiAnalyzer> logg
             _ => null,
         };
         if (body["response_format"] is null) body.Remove("response_format");
+        if (ai.DisableThinking)
+        {
+            // vLLM / SGLang üzerindeki düşünen modellerde (Qwen3 vb.) "düşünme" bölümünü kapatır.
+            // Bu iş için gereksizdir ve token sınırını tüketip cevabın boş gelmesine yol açar.
+            body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
+        }
 
+        var (status, raw) = await SendAsync(ai, token, body, ct);
+        if (status == 400 && body.ContainsKey("chat_template_kwargs"))
+        {
+            // Sunucu bu parametreyi tanımıyorsa onsuz tekrar dene.
+            logger.LogWarning("AI servisi chat_template_kwargs kabul etmedi, parametresiz tekrar deneniyor");
+            body.Remove("chat_template_kwargs");
+            (status, raw) = await SendAsync(ai, token, body, ct);
+        }
+        if (status is < 200 or >= 300)
+            throw new InvalidOperationException($"AI servisi HTTP {status}: {Truncate(raw, 500)}");
+
+        var json = JsonNode.Parse(raw);
+        var choice = json?["choices"]?[0];
+        var content = choice?["message"]?["content"]?.GetValue<string>();
+        var finishReason = choice?["finish_reason"]?.GetValue<string>();
+
+        if (finishReason == "length")
+        {
+            var thinking = choice?["message"]?["reasoning_content"] is not null || choice?["message"]?["reasoning"] is not null;
+            throw new InvalidOperationException(!thinking
+                ? $"AI yanıtı token sınırında ({ai.MaxTokens}) kesildi; Ayarlar > AI > Maks. token değerini artırın."
+                : ai.DisableThinking
+                    ? $"Model cevap yazamadan düşünme bölümünde token sınırına ({ai.MaxTokens}) ulaştı ve sunucu düşünmeyi kapatmayı desteklemiyor. Ayarlar > AI > Maks. token değerini artırın (ör. 8000)."
+                    : $"Model cevap yazamadan düşünme bölümünde token sınırına ({ai.MaxTokens}) ulaştı. Ayarlar > AI'da \"Model düşünmesini kapat\" seçeneğini açın veya Maks. token değerini artırın (ör. 8000).");
+        }
+        if (string.IsNullOrWhiteSpace(content))
+            throw new InvalidOperationException("AI yanıtında choices[0].message.content boş: " + Truncate(raw, 300));
+
+        var verdict = ParseVerdict(content);
+        logger.LogInformation("AI: '{Subject}' → {Priority}", mail.Subject, verdict.Priority);
+        return verdict;
+    }
+
+    private async Task<(int Status, string Body)> SendAsync(AiSettings ai, string? token, JsonObject body, CancellationToken ct)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Post, CompletionsUrl(ai.BaseUrl))
         {
             Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
@@ -105,20 +146,7 @@ public class AiAnalyzer(IHttpClientFactory httpFactory, ILogger<AiAnalyzer> logg
         using var http = httpFactory.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(Math.Clamp(ai.TimeoutSeconds, 10, 900));
         using var response = await http.SendAsync(request, ct);
-        var raw = await response.Content.ReadAsStringAsync(ct);
-        if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"AI servisi HTTP {(int)response.StatusCode}: {Truncate(raw, 500)}");
-
-        var json = JsonNode.Parse(raw);
-        var choice = json?["choices"]?[0];
-        var content = choice?["message"]?["content"]?.GetValue<string>()
-            ?? throw new InvalidOperationException("AI yanıtında choices[0].message.content yok: " + Truncate(raw, 300));
-        if (choice?["finish_reason"]?.GetValue<string>() == "length")
-            throw new InvalidOperationException("AI yanıtı token limitinde kesildi; Ayarlar > AI > Maks. token değerini artırın.");
-
-        var verdict = ParseVerdict(content);
-        logger.LogInformation("AI: '{Subject}' → {Priority}", mail.Subject, verdict.Priority);
-        return verdict;
+        return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(ct));
     }
 
     private static string CompletionsUrl(string baseUrl)
@@ -135,7 +163,8 @@ public class AiAnalyzer(IHttpClientFactory httpFactory, ILogger<AiAnalyzer> logg
     /// </summary>
     public static AiVerdict ParseVerdict(string content)
     {
-        var text = content.Trim();
+        // Bazı modeller düşünme metnini cevabın içine <think>...</think> olarak koyar.
+        var text = Regex.Replace(content, @"<think>.*?</think>", "", RegexOptions.Singleline).Trim();
         var fence = Regex.Match(text, @"```(?:json)?\s*(\{.*\})\s*```", RegexOptions.Singleline);
         if (fence.Success)
         {

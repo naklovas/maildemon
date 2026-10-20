@@ -127,7 +127,13 @@ public class AiSettings
     /// <summary>Boş bırakılırsa gönderilmez (bazı modeller temperature kabul etmez).</summary>
     public double? Temperature { get; set; } = 0.1;
 
-    public int MaxTokens { get; set; } = 2000;
+    public int MaxTokens { get; set; } = 4000;
+
+    /// <summary>
+    /// Düşünen (reasoning) modellerde düşünmeyi kapatır: vLLM/SGLang'e chat_template_kwargs.enable_thinking=false gönderilir.
+    /// Sunucu tanımazsa otomatik olarak parametresiz tekrar denenir.
+    /// </summary>
+    public bool DisableThinking { get; set; } = true;
 
     public int TimeoutSeconds { get; set; } = 120;
 
