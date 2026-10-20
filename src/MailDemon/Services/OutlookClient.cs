@@ -1,176 +1,213 @@
-using Azure.Core;
-using Azure.Identity;
+using System.Runtime.InteropServices;
 using MailDemon.Models;
-using Microsoft.Graph;
-using Message = Microsoft.Graph.Models.Message;
 
 namespace MailDemon.Services;
 
-/// <summary>Outlook / Microsoft 365 posta kutusunu Microsoft Graph üzerinden okur.</summary>
-public class OutlookClient(IConfiguration config, ILogger<OutlookClient> logger)
+/// <summary>
+/// Bilgisayarda kurulu Outlook masaüstü uygulamasından (klasik Outlook, COM) mail okur.
+/// Azure kaydı veya bulut erişimi gerekmez; Outlook'un açık olduğu Windows oturumunda çalışmalıdır.
+/// </summary>
+public class OutlookClient(ILogger<OutlookClient> logger)
 {
-    private static readonly string[] Scopes = ["https://graph.microsoft.com/Mail.Read", "offline_access"];
+    private const int OlFolderInbox = 6;
+    private const int OlMailItem = 43;
+    private const int OlTo = 1;
+    private const int OlCc = 2;
+    private const string PrSmtpAddress = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E";
 
-    private readonly string _authRecordPath = Path.Combine(DataDir.Get(config), "auth-record.json");
-    private readonly SemaphoreSlim _gate = new(1, 1);
-    private GraphServiceClient? _graph;
-    private string? _graphKey;
-
-    /// <summary>Cihaz kodu ile giriş bekleniyorsa kullanıcıya gösterilecek mesaj.</summary>
-    public string? PendingDeviceCodeMessage { get; private set; }
+    /// <summary>Outlook'taki hesaplarımın adresleri (otomatik algılanır, kimlik ayarlarına eklenir).</summary>
+    public IReadOnlyList<string> DetectedEmails { get; private set; } = [];
 
     public string? SignedInAs { get; private set; }
 
-    public async Task<List<MailItem>> GetRecentMailsAsync(AppSettings s, DateTimeOffset since, CancellationToken ct)
+    public Task<List<MailItem>> GetRecentMailsAsync(AppSettings s, DateTimeOffset since, CancellationToken ct) =>
+        RunSta(() =>
+        {
+            var ns = GetNamespace();
+            DetectAccounts(ns);
+            var folder = ResolveFolder(ns, s.Mailbox);
+            var items = folder.Items;
+            items.Sort("[ReceivedTime]", true);
+
+            var result = new List<MailItem>();
+            dynamic? item = items.GetFirst();
+            while (item is not null && result.Count < s.Scan.MaxMailsPerScan && !ct.IsCancellationRequested)
+            {
+                try
+                {
+                    // Toplantı istekleri, okundu bilgileri vb. atlanır.
+                    if ((int)item.Class == OlMailItem)
+                    {
+                        var received = new DateTimeOffset((DateTime)item.ReceivedTime);
+                        if (received < since) break;
+                        if (!s.Scan.OnlyUnread || (bool)item.UnRead)
+                            result.Add(ToMailItem(item, received));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Bir mail okunamadı, atlanıyor");
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(item);
+                }
+                item = items.GetNext();
+            }
+            return result;
+        });
+
+    /// <summary>Maili Outlook'ta açar (arayüzdeki "Outlook'ta aç" butonu).</summary>
+    public Task OpenAsync(string entryId) =>
+        RunSta(() =>
+        {
+            var ns = GetNamespace();
+            ns.GetItemFromID(entryId).Display(false);
+            return 0;
+        });
+
+    private static MailItem ToMailItem(dynamic m, DateTimeOffset received)
     {
-        var graph = await GetGraphAsync(s, ct);
+        var to = new List<string>();
+        var cc = new List<string>();
+        foreach (dynamic r in m.Recipients)
+        {
+            string address = RecipientSmtp(r);
+            if ((int)r.Type == OlTo) to.Add(address);
+            else if ((int)r.Type == OlCc) cc.Add(address);
+        }
 
-        var filter = $"receivedDateTime ge {since.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ}";
-        if (s.Scan.OnlyUnread) filter += " and isRead eq false";
+        string fromEmail = m.SenderEmailAddress ?? "";
+        if ((string?)m.SenderEmailType == "EX")
+        {
+            try { fromEmail = ExchangeSmtp(m.Sender) ?? fromEmail; } catch { }
+        }
 
-        string[] select = ["id", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime", "body", "webLink", "hasAttachments", "importance"];
-        string[] orderBy = ["receivedDateTime desc"];
-        // Gövdeyi HTML yerine düz metin iste.
-        const string prefer = "outlook.body-content-type=\"text\"";
-
-        // ClientSecret modunda /users/{adres}, cihaz kodu modunda /me kullanılır.
-        // İki uç noktanın sorgu tipleri farklı olduğu için yapılandırma iki kez yazılıyor.
-        var page = s.Mailbox.AuthMode == MailboxAuthMode.ClientSecret
-            ? await graph.Users[s.Mailbox.UserEmail].MailFolders[s.Mailbox.Folder].Messages.GetAsync(rc =>
-            {
-                rc.QueryParameters.Filter = filter;
-                rc.QueryParameters.Orderby = orderBy;
-                rc.QueryParameters.Top = s.Scan.MaxMailsPerScan;
-                rc.QueryParameters.Select = select;
-                rc.Headers.Add("Prefer", prefer);
-            }, ct)
-            : await graph.Me.MailFolders[s.Mailbox.Folder].Messages.GetAsync(rc =>
-            {
-                rc.QueryParameters.Filter = filter;
-                rc.QueryParameters.Orderby = orderBy;
-                rc.QueryParameters.Top = s.Scan.MaxMailsPerScan;
-                rc.QueryParameters.Select = select;
-                rc.Headers.Add("Prefer", prefer);
-            }, ct);
-
-        return (page?.Value ?? []).Select(ToMailItem).ToList();
+        return new MailItem
+        {
+            Id = (string)m.EntryID,
+            Subject = (string?)m.Subject ?? "(konu yok)",
+            FromName = (string?)m.SenderName ?? "",
+            FromEmail = fromEmail,
+            To = to,
+            Cc = cc,
+            ReceivedAt = received,
+            Body = (string?)m.Body ?? "",
+            HasAttachments = (int)m.Attachments.Count > 0,
+            // olImportanceHigh = 2
+            Importance = (int)m.Importance == 2 ? "high" : null,
+        };
     }
 
-    private static MailItem ToMailItem(Message m) => new()
+    /// <summary>Exchange iç adreslerini (/O=EXCHANGELABS/...) SMTP adresine çevirir.</summary>
+    private static string RecipientSmtp(dynamic r)
     {
-        Id = m.Id ?? "",
-        Subject = m.Subject ?? "(konu yok)",
-        FromName = m.From?.EmailAddress?.Name ?? "",
-        FromEmail = m.From?.EmailAddress?.Address ?? "",
-        To = (m.ToRecipients ?? []).Select(r => r.EmailAddress?.Address ?? "").Where(a => a != "").ToList(),
-        Cc = (m.CcRecipients ?? []).Select(r => r.EmailAddress?.Address ?? "").Where(a => a != "").ToList(),
-        ReceivedAt = m.ReceivedDateTime ?? DateTimeOffset.UtcNow,
-        Body = m.Body?.Content ?? "",
-        WebLink = m.WebLink,
-        HasAttachments = m.HasAttachments ?? false,
-        Importance = m.Importance?.ToString(),
-    };
-
-    /// <summary>Ayarlar değiştiyse istemciyi yeniden oluşturur.</summary>
-    public void Reset()
-    {
-        _graph = null;
-        _graphKey = null;
-        SignedInAs = null;
-    }
-
-    private async Task<GraphServiceClient> GetGraphAsync(AppSettings s, CancellationToken ct)
-    {
-        var m = s.Mailbox;
-        if (string.IsNullOrWhiteSpace(m.ClientId))
-            throw new InvalidOperationException("Ayarlar > Outlook bölümünde Client ID girilmemiş.");
-
-        var key = $"{m.AuthMode}|{m.TenantId}|{m.ClientId}|{m.ClientSecret}|{m.UserEmail}";
-        await _gate.WaitAsync(ct);
+        string address = r.Address ?? "";
+        if (address.Contains('@')) return address;
         try
         {
-            if (_graph is not null && _graphKey == key) return _graph;
-
-            TokenCredential credential;
-            if (m.AuthMode == MailboxAuthMode.ClientSecret)
-            {
-                if (string.IsNullOrWhiteSpace(m.UserEmail))
-                    throw new InvalidOperationException("ClientSecret modunda posta kutusu adresi (UserEmail) gerekli.");
-                credential = new ClientSecretCredential(m.TenantId, m.ClientId, m.ClientSecret);
-                _graph = new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
-                SignedInAs = m.UserEmail;
-            }
-            else
-            {
-                credential = await CreateDeviceCodeCredentialAsync(m, ct);
-                _graph = new GraphServiceClient(credential, Scopes);
-            }
-            _graphKey = key;
-            return _graph;
+            string? smtp = ExchangeSmtp(r.AddressEntry);
+            if (!string.IsNullOrEmpty(smtp)) return smtp;
         }
-        finally
+        catch { }
+        try
         {
-            _gate.Release();
+            return (string)r.PropertyAccessor.GetProperty(PrSmtpAddress);
+        }
+        catch
+        {
+            return address;
         }
     }
 
-    private async Task<DeviceCodeCredential> CreateDeviceCodeCredentialAsync(MailboxSettings m, CancellationToken ct)
+    private static string? ExchangeSmtp(dynamic? entry)
     {
-        var options = new DeviceCodeCredentialOptions
-        {
-            TenantId = string.IsNullOrWhiteSpace(m.TenantId) ? "common" : m.TenantId,
-            ClientId = m.ClientId,
-            // Token'lar diskte saklanır, böylece uygulama yeniden başlayınca tekrar giriş gerekmez.
-            // Linux'ta libsecret yoksa şifrelenmemiş dosyaya düşer.
-            TokenCachePersistenceOptions = new TokenCachePersistenceOptions
-            {
-                Name = "maildemon",
-                UnsafeAllowUnencryptedStorage = true,
-            },
-            DeviceCodeCallback = (info, _) =>
-            {
-                PendingDeviceCodeMessage = info.Message;
-                logger.LogWarning("Outlook girişi gerekiyor: {Message}", info.Message);
-                return Task.CompletedTask;
-            },
-        };
+        if (entry is null) return null;
+        var user = entry.GetExchangeUser();
+        if (user is not null) return (string)user.PrimarySmtpAddress;
+        var list = entry.GetExchangeDistributionList();
+        if (list is not null) return (string)list.PrimarySmtpAddress;
+        return null;
+    }
 
-        if (File.Exists(_authRecordPath))
+    private void DetectAccounts(dynamic ns)
+    {
+        var emails = new List<string>();
+        try
         {
-            await using var stream = File.OpenRead(_authRecordPath);
-            options.AuthenticationRecord = await AuthenticationRecord.DeserializeAsync(stream, ct);
+            foreach (dynamic acc in ns.Accounts)
+            {
+                string smtp = acc.SmtpAddress ?? "";
+                if (smtp.Contains('@')) emails.Add(smtp);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Outlook hesapları okunamadı");
+        }
+        DetectedEmails = emails;
+        SignedInAs = emails.FirstOrDefault() ?? "Outlook";
+    }
+
+    private static dynamic ResolveFolder(dynamic ns, MailboxSettings m)
+    {
+        dynamic inbox = ns.GetDefaultFolder(OlFolderInbox);
+        if (!string.IsNullOrWhiteSpace(m.Account))
+        {
+            dynamic? found = null;
+            foreach (dynamic acc in ns.Accounts)
+            {
+                if (string.Equals((string)acc.SmtpAddress, m.Account.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    found = acc.DeliveryStore.GetDefaultFolder(OlFolderInbox);
+                    break;
+                }
+            }
+            inbox = found ?? throw new InvalidOperationException($"Outlook'ta '{m.Account}' hesabı bulunamadı.");
         }
 
-        var credential = new DeviceCodeCredential(options);
-
-        if (options.AuthenticationRecord is null)
+        var folder = inbox;
+        foreach (var part in (m.Folder ?? "").Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            // İlk giriş: kullanıcı web arayüzünde gösterilen kodu microsoft.com/devicelogin'e girer.
-            AuthenticationRecord record;
             try
             {
-                record = await credential.AuthenticateAsync(new TokenRequestContext(Scopes), ct);
+                folder = folder.Folders[part];
             }
-            finally
+            catch (COMException)
             {
-                // Başarısız veya süresi dolmuş kodu ekranda bırakma.
-                PendingDeviceCodeMessage = null;
+                throw new InvalidOperationException($"Gelen Kutusu altında '{part}' klasörü bulunamadı.");
             }
-            await using var stream = File.Create(_authRecordPath);
-            await record.SerializeAsync(stream, ct);
-            SignedInAs = record.Username;
         }
-        else
-        {
-            SignedInAs = options.AuthenticationRecord.Username;
-        }
-
-        return credential;
+        return folder;
     }
 
-    public void SignOut()
+    private static dynamic GetNamespace()
     {
-        if (File.Exists(_authRecordPath)) File.Delete(_authRecordPath);
-        Reset();
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("Outlook bağlantısı sadece Windows'ta, Outlook masaüstü uygulaması kuruluyken çalışır.");
+
+        var type = Type.GetTypeFromProgID("Outlook.Application")
+            ?? throw new InvalidOperationException("Klasik Outlook masaüstü uygulaması bulunamadı. (\"Yeni Outlook\" bu bağlantıyı desteklemez; klasik Outlook'a geçin.)");
+
+        // Outlook zaten açıksa çalışan örneğe bağlanır; değilse arka planda başlatır.
+        dynamic app = Activator.CreateInstance(type)!;
+        dynamic ns = app.GetNamespace("MAPI");
+        ns.Logon(Type.Missing, Type.Missing, false, false);
+        return ns;
+    }
+
+    /// <summary>Outlook nesne modeli tek iş parçacıklı (STA) çağrılmak ister.</summary>
+    private static Task<T> RunSta<T>(Func<T> work)
+    {
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { tcs.SetResult(work()); }
+            catch (Exception ex) { tcs.SetException(ex); }
+        });
+        if (OperatingSystem.IsWindows()) thread.SetApartmentState(ApartmentState.STA);
+        thread.IsBackground = true;
+        thread.Start();
+        return tcs.Task;
     }
 }

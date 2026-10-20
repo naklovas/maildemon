@@ -57,30 +57,38 @@
   </div>
 
   <div class="card">
-    <h2>🤖 AI yorumlama (Claude)</h2>
-    <p class="hint">Mailler özet, istekler ve önem derecesi için Anthropic Claude API'ye gönderilir.</p>
+    <h2>🤖 AI yorumlama</h2>
+    <p class="hint">Şirket içi, OpenAI uyumlu (<code>/v1/chat/completions</code>) AI servisi. Mailler sadece bu adrese gönderilir.</p>
     <label class="inline"><input type="checkbox" id="ai-enabled"> AI yorumlama açık</label>
+    <div class="grid2">
+      <div><label>Servis adresi (Base URL)</label><input type="text" id="ai-url" placeholder="https://ai.firma.local/v1"></div>
+      <div><label>Model adı</label><input type="text" id="ai-model" placeholder="gpt-4o, llama-3.3-70b, qwen2.5…"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Token</label><input type="password" id="ai-key" placeholder="Boşsa AI_API_KEY ortam değişkeni kullanılır"></div>
+      <div><label>Token başlığı</label>
+        <select id="ai-header">
+          <option value="Authorization">Authorization: Bearer &lt;token&gt; (OpenAI, vLLM, LiteLLM, Ollama)</option>
+          <option value="api-key">api-key: &lt;token&gt; (Azure OpenAI)</option>
+        </select>
+      </div>
+    </div>
     <div class="grid3">
-      <div><label>API anahtarı</label><input type="password" id="ai-key" placeholder="Boşsa ANTHROPIC_API_KEY kullanılır"></div>
-      <div><label>Model</label>
-        <select id="ai-model">
-          <option value="claude-opus-5-5">Claude Opus 5.5 (önerilen)</option>
-          <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (daha ucuz)</option>
-          <option value="claude-haiku-5-5">Claude Haiku 5.5 (en ucuz, hızlı)</option>
+      <div><label>JSON modu</label>
+        <select id="ai-json">
+          <option value="JsonObject">json_object (çoğu sunucu)</option>
+          <option value="JsonSchema">json_schema (en katı)</option>
+          <option value="None">Yok (sadece talimat)</option>
         </select>
       </div>
-      <div><label>Düşünme seviyesi</label>
-        <select id="ai-effort">
-          <option value="low">Düşük (hızlı)</option>
-          <option value="medium">Orta</option>
-          <option value="high">Yüksek (dikkatli)</option>
-        </select>
-      </div>
+      <div><label>Temperature (boş = gönderme)</label><input type="number" id="ai-temp" step="0.1" min="0" max="2"></div>
+      <div><label>Maks. token (yanıt)</label><input type="number" id="ai-maxtokens" min="100"></div>
     </div>
     <label>Ek kriterler / talimatlar</label>
     <textarea id="ai-extra" placeholder="Örn:&#10;- Müşteri şikayetleri en az Yüksek olsun.&#10;- Fatura/ödeme onayı istenen mailler Kritik.&#10;- Toplantı davetleri Düşük."></textarea>
     <div class="grid3">
       <div><label>Gövde karakter sınırı</label><input type="number" id="ai-maxchars"></div>
+      <div><label>Zaman aşımı (saniye)</label><input type="number" id="ai-timeout" min="10"></div>
     </div>
   </div>
 
@@ -111,26 +119,12 @@
   </div>
 
   <div class="card">
-    <h2>📬 Outlook bağlantısı</h2>
-    <p class="hint">Azure portalında bir "App registration" oluşturup Client ID'yi buraya girin. Kurulum adımları README'de.</p>
-    <div class="grid3">
-      <div><label>Giriş yöntemi</label>
-        <select id="mb-mode">
-          <option value="DeviceCode">Kendi hesabımla giriş (cihaz kodu)</option>
-          <option value="ClientSecret">Uygulama izni (client secret)</option>
-        </select>
-      </div>
-      <div><label>Tenant ID</label><input type="text" id="mb-tenant" placeholder="common"></div>
-      <div><label>Client ID</label><input type="text" id="mb-client"></div>
+    <h2>📬 Outlook</h2>
+    <p class="hint">Bilgisayarınızdaki Outlook masaüstü uygulamasından okunur; ek kurulum gerekmez. Hesap adresleriniz otomatik algılanır<span id="mb-detected"></span>.</p>
+    <div class="grid2">
+      <div><label>Klasör (boş = Gelen Kutusu)</label><input type="text" id="mb-folder" placeholder="Alt klasör için: Projeler veya Projeler/2026"></div>
+      <div><label>Hesap (birden fazla hesap varsa)</label><input type="text" id="mb-account" placeholder="Boş = varsayılan hesap"></div>
     </div>
-    <div class="grid3" id="mb-secret-row">
-      <div><label>Client secret</label><input type="password" id="mb-secret"></div>
-      <div><label>Posta kutusu adresi</label><input type="email" id="mb-user"></div>
-    </div>
-    <div class="grid3">
-      <div><label>Klasör</label><input type="text" id="mb-folder" placeholder="inbox"></div>
-    </div>
-    <button class="secondary small" style="margin-top:10px" onclick="signOut()">Outlook oturumunu kapat</button>
   </div>
 
   <div class="sticky-save">
@@ -214,13 +208,14 @@ function fill() {
   $("ignored").value = S.ignoredSenders.join("\n");
 
   $("ai-enabled").checked = S.ai.enabled;
+  $("ai-url").value = S.ai.baseUrl;
   $("ai-key").value = S.ai.apiKey;
   $("ai-model").value = S.ai.model;
-  if ($("ai-model").value !== S.ai.model) {
-    $("ai-model").insertAdjacentHTML("beforeend", `<option value="${esc(S.ai.model)}">${esc(S.ai.model)}</option>`);
-    $("ai-model").value = S.ai.model;
-  }
-  $("ai-effort").value = S.ai.effort;
+  $("ai-header").value = S.ai.authHeader === "Authorization" ? "Authorization" : "api-key";
+  $("ai-json").value = S.ai.jsonMode;
+  $("ai-temp").value = S.ai.temperature ?? "";
+  $("ai-maxtokens").value = S.ai.maxTokens;
+  $("ai-timeout").value = S.ai.timeoutSeconds;
   $("ai-extra").value = S.ai.extraInstructions;
   $("ai-maxchars").value = S.ai.maxBodyChars;
 
@@ -237,19 +232,9 @@ function fill() {
   $("al-notify").checked = S.alerts.browserNotification;
   $("al-webhook").value = S.alerts.webhookUrl;
 
-  $("mb-mode").value = S.mailbox.authMode;
-  $("mb-tenant").value = S.mailbox.tenantId;
-  $("mb-client").value = S.mailbox.clientId;
-  $("mb-secret").value = S.mailbox.clientSecret;
-  $("mb-user").value = S.mailbox.userEmail;
   $("mb-folder").value = S.mailbox.folder;
-  toggleSecret();
+  $("mb-account").value = S.mailbox.account;
 }
-
-function toggleSecret() {
-  $("mb-secret-row").style.display = $("mb-mode").value === "ClientSecret" ? "" : "none";
-}
-$("mb-mode").onchange = toggleSecret;
 
 function collect() {
   return {
@@ -264,9 +249,14 @@ function collect() {
     ignoredSenders: lines($("ignored").value),
     ai: {
       enabled: $("ai-enabled").checked,
+      baseUrl: $("ai-url").value.trim(),
       apiKey: $("ai-key").value.trim(),
-      model: $("ai-model").value,
-      effort: $("ai-effort").value,
+      authHeader: $("ai-header").value,
+      model: $("ai-model").value.trim(),
+      jsonMode: $("ai-json").value,
+      temperature: $("ai-temp").value === "" ? null : +$("ai-temp").value,
+      maxTokens: +$("ai-maxtokens").value || 2000,
+      timeoutSeconds: +$("ai-timeout").value || 120,
       extraInstructions: $("ai-extra").value,
       maxBodyChars: +$("ai-maxchars").value || 12000,
     },
@@ -286,12 +276,8 @@ function collect() {
       webhookUrl: $("al-webhook").value.trim(),
     },
     mailbox: {
-      authMode: $("mb-mode").value,
-      tenantId: $("mb-tenant").value.trim() || "common",
-      clientId: $("mb-client").value.trim(),
-      clientSecret: $("mb-secret").value.trim(),
-      userEmail: $("mb-user").value.trim(),
-      folder: $("mb-folder").value.trim() || "inbox",
+      folder: $("mb-folder").value.trim(),
+      account: $("mb-account").value.trim(),
     },
   };
 }
@@ -304,12 +290,6 @@ async function save() {
   } catch (e) {
     $("save-msg").textContent = "Hata: " + e.message;
   }
-}
-
-async function signOut() {
-  if (!confirm("Outlook oturumu kapatılsın mı? Sonraki taramada yeniden giriş istenir.")) return;
-  await api("POST", "/api/outlook/signout");
-  refreshHeaderStatus();
 }
 
 async function runTest() {
@@ -343,7 +323,8 @@ async function runTest() {
 (async () => {
   S = await api("GET", "/api/settings");
   fill();
-  refreshHeaderStatus();
+  const st = await refreshHeaderStatus();
+  if (st?.detectedEmails?.length) $("mb-detected").textContent = ": " + st.detectedEmails.join(", ");
 })();
 </script>
 </body>

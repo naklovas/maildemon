@@ -36,7 +36,7 @@ async function refreshHeaderStatus() {
   if (!el) return null;
   try {
     const st = await api("GET", "/api/status");
-    const who = st.signedInAs ? `📬 ${esc(st.signedInAs)}` : "📭 Outlook bağlı değil";
+    const who = st.signedInAs ? `📬 ${esc(st.signedInAs)}` : "📭 Outlook'a henüz bağlanılmadı";
     const scan = st.isScanning ? "⏳ taranıyor…" : `Son tarama: ${fmtDate(st.lastScanAt)}`;
     el.innerHTML = `${who} · ${scan}`;
     return st;

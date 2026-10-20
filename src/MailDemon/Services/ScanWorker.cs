@@ -50,6 +50,11 @@ public class ScanWorker(
             var since = DateTimeOffset.UtcNow.AddHours(-Math.Max(1, s.Scan.LookbackHours));
             var mails = await outlook.GetRecentMailsAsync(s, since, ct);
 
+            // Outlook'taki hesap adreslerim kimlik ayarlarına girilmemiş olsa da "bana mı" kontrolünde kullanılsın.
+            foreach (var email in outlook.DetectedEmails)
+                if (!s.Me.Emails.Contains(email, StringComparer.OrdinalIgnoreCase))
+                    s.Me.Emails.Add(email);
+
             var newMails = mails.Where(m => !store.Contains(m.Id)).OrderBy(m => m.ReceivedAt).ToList();
             logger.LogInformation("{Total} mail bulundu, {New} yeni", mails.Count, newMails.Count);
 

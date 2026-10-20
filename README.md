@@ -1,6 +1,6 @@
 # 📨 MailDemon
 
-Outlook gelen kutunuzu düzenli aralıklarla tarar ve her maile şu soruların cevabını yazar:
+Bilgisayarınızdaki **Outlook masaüstü uygulamasının** gelen kutusunu düzenli aralıklarla tarar ve **şirket içi AI servisinize** (OpenAI uyumlu API) yorumlatarak her maile şu soruların cevabını yazar:
 
 - **Size hitaben mi yazılmış?** (TO'da mısınız, CC'de mi, adınız geçiyor mu, sizden bir şey isteniyor mu)
 - **Sizden ne isteniyor?** Her iş ayrı madde olarak, son tarihiyle birlikte
@@ -11,56 +11,60 @@ Outlook gelen kutunuzu düzenli aralıklarla tarar ve her maile şu soruların c
 ## Nasıl çalışır?
 
 ```
-Outlook (Microsoft Graph)  ──►  Kural motoru  ──►  Claude AI  ──►  Sonuç + Alarm  ──►  Web arayüzü
-   her N dakikada                VIP, kelime,       özet, istekler,     data/*.json      localhost:5080
-   yeni mailler                  TO/CC, yok say     önem, gerekçe
+Lokal Outlook (COM)  ──►  Kural motoru  ──►  Şirket içi AI  ──►  Sonuç + Alarm  ──►  Web arayüzü
+   her N dakikada          VIP, kelime,       /chat/completions   data/*.json      localhost:5080
+   yeni mailler            TO/CC, yok say     özet, istekler, önem
 ```
 
-1. **ScanWorker** her `N` dakikada bir Graph API ile son `X` saatteki mailleri çeker. Daha önce analiz edilen mailleri atlar.
+1. **ScanWorker** her `N` dakikada bir, açık olan Outlook uygulamasından son `X` saatteki mailleri okur. Daha önce analiz edilen mailleri atlar. Outlook'taki hesap adresleriniz otomatik algılanır.
 2. **RuleEngine** AI'a gitmeden önce deterministik kuralları uygular:
    - Yok sayılan göndericiler (`noreply@*` gibi) tamamen atlanır.
    - TO, CC veya BCC'de olup olmadığınıza ve adınızın geçip geçmediğine bakılır.
    - Önemli kişi ve anahtar kelime eşleşmelerinden minimum önem hesaplanır.
    - Size gelmeyen ve hiçbir kurala uymayan mailler AI'a **gönderilmez**. Bu ayar kapatılabilir.
-3. **AiAnalyzer** maili, kimliğinizi, önemli kişiler listesini ve ek kriterlerinizi Claude'a gönderir. Yanıt JSON şemasıyla zorunlu kılınmış yapılandırılmış bir çıktıdır. Sistem talimatı, mail içindeki talimatları ("bunu kritik işaretle" gibi) dikkate almamasını söyler.
+3. **AiAnalyzer** maili, kimliğinizi, önemli kişiler listesini ve ek kriterlerinizi şirket içi AI servisinin `/chat/completions` adresine gönderir ve JSON yanıt ister. Model JSON'u kod bloğu içinde ya da önüne açıklama ekleyerek döndürse veya önemi Türkçe yazsa ("Kritik") da yanıt çözümlenir. Sistem talimatı, mail içindeki talimatları ("bunu kritik işaretle" gibi) dikkate almamasını söyler.
 4. **Nihai önem** = `max(kural önemi, AI önemi)`. Bu değer alarm eşiğini geçerse alarm oluşturulur.
 
 ## Kurulum
 
 ### 1. Gereksinimler
 
+- Windows ve **klasik Outlook** masaüstü uygulaması (Microsoft 365 / Outlook 2016+). *"Yeni Outlook"* COM bağlantısını desteklemez. Sağ üstteki "Yeni Outlook" anahtarını kapatarak klasik Outlook'a dönebilirsiniz.
 - [.NET 8 SDK](https://dotnet.microsoft.com/download)
-- Bir [Anthropic API anahtarı](https://console.anthropic.com/)
-- Outlook / Microsoft 365 hesabı ve Azure portalında uygulama kaydı yetkisi. Kurumsal hesaplarda bu yetki genelde BT'dedir.
+- Şirket içi, OpenAI uyumlu AI servisinin adresi, model adı ve token'ı. Örnekler: vLLM, LiteLLM, Ollama, Azure OpenAI ya da kurum içi bir gateway.
 
-### 2. Azure'da uygulama kaydı (Outlook erişimi için)
+### 2. Çalıştırma
 
-1. <https://portal.azure.com> → **Microsoft Entra ID** → **App registrations** → **New registration**
-2. Ad: `MailDemon`.
-   **Supported account types:** Sadece kendi şirket hesabınız için *Single tenant* seçin. Kişisel Outlook.com hesabı için *…and personal Microsoft accounts* seçin.
-3. Oluşturduktan sonra **Application (client) ID** ve **Directory (tenant) ID** değerlerini not edin.
-4. **Authentication** → **Advanced settings** → **Allow public client flows** = **Yes**. Cihaz kodu ile giriş için bu gerekli.
-5. **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated** → `Mail.Read` ekleyin.
+Uygulamayı **Outlook'un açık olduğu Windows oturumunda, kendi kullanıcınızla** çalıştırın. Yönetici olarak çalıştırmayın: Outlook ve uygulama aynı yetki seviyesinde olmalıdır, yoksa bağlantı kurulamaz.
 
-> **Alternatif (sunucuda, kullanıcı girişi olmadan):** **Application** izni olarak `Mail.Read` ekleyin, yönetici onayı (*Grant admin consent*) verin ve **Certificates & secrets** altından bir client secret oluşturun. Ayarlarda giriş yöntemini *Uygulama izni* seçip secret'ı ve posta kutusu adresini girin. Bu izin tüm posta kutularını okuyabilir. Exchange tarafında [Application Access Policy](https://learn.microsoft.com/graph/auth-limit-mailbox-access) ile tek kutuya kısıtlamanız önerilir.
-
-### 3. Çalıştırma
-
-```bash
-cd src/MailDemon
-export ANTHROPIC_API_KEY=sk-ant-...      # Windows: set ANTHROPIC_API_KEY=sk-ant-...
+```bat
+cd src\MailDemon
 dotnet run
 ```
 
 Tarayıcıda <http://localhost:5080> adresini açın, ardından:
 
-1. **Ayarlar → Kimliğim:** adınızı, e-posta adreslerinizi ve hitap şekillerinizi ("Ahmet Bey", "Ahmet") girin.
-2. **Ayarlar → Önemli kişiler:** Genel Müdür'ü ekleyin, örneğin `gm@firma.com`, *Genel Müdür*, minimum önem **Kritik**.
-3. **Ayarlar → Outlook bağlantısı:** Tenant ID ve Client ID'yi girin, ardından **Kaydet**'e basın.
-4. Gelen Kutusu sayfasında mavi bir kutuda *"microsoft.com/devicelogin adresine gidip XXXX kodunu girin"* mesajı çıkar. Girişi bir kez yapmanız yeterli. Oturum `data/` klasöründe saklanır.
+1. **Ayarlar → AI yorumlama:**
+   - **Servis adresi:** ör. `https://ai.firma.local/v1`. Sonuna `/chat/completions` otomatik eklenir. Azure OpenAI'da tam URL'yi yapıştırın: `https://<kaynak>.openai.azure.com/openai/deployments/<ad>/chat/completions?api-version=2024-10-21`.
+   - **Model adı:** servisinizdeki model adı.
+   - **Token:** Token `Authorization: Bearer <token>` başlığıyla gönderilir. Azure OpenAI için başlığı `api-key` seçin. Token'ı ayarlara yazmak yerine `AI_API_KEY` ortam değişkeniyle de verebilirsiniz.
+   - **JSON modu:** Servisiniz `response_format` desteklemiyorsa ve 400 hatası alıyorsanız *Yok* seçin. Model sıcaklık parametresini kabul etmiyorsa *Temperature* alanını boş bırakın.
+2. **Ayarlar → Kimliğim:** adınızı ve hitap şekillerinizi ("Ahmet Bey", "Ahmet") girin. Outlook hesap adresleriniz otomatik algılanır, başka takma adlarınız varsa ekleyin.
+3. **Ayarlar → Önemli kişiler:** Genel Müdür'ü ekleyin, örneğin `gm@firma.com`, *Genel Müdür*, minimum önem **Kritik**.
+4. **Kaydet**'e basın. Tarama hemen başlar.
 5. Gelen Kutusu sayfasında **🔔 Sesli alarmı aç** butonuna bir kez tıklayın. Tarayıcılar ses çalmak ve bildirim göstermek için kullanıcı etkileşimi ister.
 
-Outlook bağlantısını kurmadan önce **Ayarlar → 🧪 Kuralları test et** bölümünden örnek bir mail yazıp kuralların ve AI'ın nasıl karar verdiğini görebilirsiniz.
+**Ayarlar → 🧪 Kuralları test et** bölümünden örnek bir mail yazıp kuralların ve AI'ın nasıl karar verdiğini görebilirsiniz. AI bağlantısını test etmek için de bu bölümü kullanın.
+
+### Olası sorunlar
+
+| Belirti | Çözüm |
+|---|---|
+| *"Bir program e-posta adresi bilgilerine erişmeye çalışıyor"* uyarısı | Outlook → Dosya → Seçenekler → Güven Merkezi → Programlı Erişim. Antivirüs güncelse uyarı çıkmaz. Kurumsal ortamda BT bu ayarı GPO ile yönetiyor olabilir |
+| *"Klasik Outlook masaüstü uygulaması bulunamadı"* | Yeni Outlook kullanılıyor ya da Outlook kurulu değil |
+| Tarama hatası: `0x80080005` / `CO_E_SERVER_EXEC_FAILURE` | Uygulama ile Outlook farklı yetki seviyesinde çalışıyor. İkisini de normal kullanıcı olarak açın |
+| AI hatası: HTTP 400 `response_format` | JSON modunu *json_object* veya *Yok* yapın |
+| AI hatası: SSL / sertifika | Şirket kök sertifikası Windows'a yüklü olmalı. BT'den isteyin |
 
 ## Ayarlar
 
@@ -70,18 +74,18 @@ Outlook bağlantısını kurmadan önce **Ayarlar → 🧪 Kuralları test et** 
 | Önemli kişiler | Gönderici adresi veya `*@firma.com` deseni → minimum önem. "Sadece TO" işaretliyse CC'de olduğunuzda önem bir seviye düşer |
 | Anahtar kelime kuralları | "acil", "fatura onayı" gibi ifadeler → minimum önem. Türkçe büyük/küçük harf duyarsızdır |
 | Yok sayılanlar | Bülten ve otomatik bildirim göndericileri |
-| AI | Model (varsayılan Claude Opus 5.5; Sonnet 5.5 veya Haiku 5.5 daha ucuz), düşünme seviyesi ve serbest metin **ek kriterler**. Örnek: "Müşteri şikayetleri en az Yüksek olsun" |
+| AI | Servis adresi, model, token, JSON modu ve serbest metin **ek kriterler**. Örnek: "Müşteri şikayetleri en az Yüksek olsun" |
 | Tarama | Aralık, geriye dönük saat, sadece okunmamışlar, CC dahil mi |
+| Outlook | Taranacak klasör (boş = Gelen Kutusu, alt klasör için `Projeler/2026`) ve birden fazla hesap varsa hangisi |
 | Alarm | Alarm eşiği (varsayılan Kritik), ses, masaüstü bildirimi, Teams/Slack webhook |
 
 Ayarlar `src/MailDemon/data/settings.json` dosyasında tutulur, analizler `data/analyses.json` dosyasındadır. `data/` klasörü git'e eklenmez.
 
 ## Güvenlik ve gizlilik
 
-- Web arayüzü sadece `localhost:5080` adresini dinler ve oturum açma ekranı yoktur. Başka makinelerden erişime açacaksanız önüne kimlik doğrulama koyun (ör. IIS + Windows Authentication veya bir reverse proxy).
-- AI'a gönderilen mailler Anthropic API'sine iletilir. Şirket politikanızı kontrol edin. *"Alıcılarda olmadığım mailleri AI'a gönderme"* seçeneği açık olduğunda size gelmeyen mailler gönderilmez. Gövde ayarlardaki karakter sınırında kesilir.
-- API anahtarı ve client secret `data/settings.json` içinde düz metin olarak durur. Arayüze maskelenmiş gelir. API anahtarını ayarlara yazmak yerine `ANTHROPIC_API_KEY` ortam değişkeni kullanmanız önerilir.
-- Outlook oturum token'ları diskte saklanır. Linux'ta libsecret yoksa şifrelenmemiş dosyaya yazılır.
+- Mailler sadece ayarlarda girdiğiniz şirket içi AI adresine gönderilir. Başka bir buluta gitmez. *"Alıcılarda olmadığım mailleri AI'a gönderme"* seçeneği açık olduğunda size gelmeyen mailler gönderilmez. Gövde ayarlardaki karakter sınırında kesilir.
+- Web arayüzü sadece `localhost:5080` adresini dinler ve oturum açma ekranı yoktur. Başka makinelerden erişime açmayın.
+- AI token'ı `data/settings.json` içinde düz metin olarak durur. Arayüze maskelenmiş gelir. İsterseniz token'ı ayarlara yazmak yerine `AI_API_KEY` ortam değişkeniyle verin.
 
 ## Proje yapısı
 
@@ -90,9 +94,9 @@ src/MailDemon/
 ├── Program.cs              # Minimal API uç noktaları + DI
 ├── Models/                 # AppSettings, MailAnalysis, Alert
 ├── Services/
-│   ├── OutlookClient.cs    # Microsoft Graph: cihaz kodu / client secret ile mail okuma
+│   ├── OutlookClient.cs    # Lokal Outlook (COM) üzerinden mail okuma, "Outlook'ta aç"
 │   ├── RuleEngine.cs       # VIP, anahtar kelime, TO/CC, yok sayma kuralları
-│   ├── AiAnalyzer.cs       # Claude API çağrısı (yapılandırılmış JSON çıktı)
+│   ├── AiAnalyzer.cs       # OpenAI uyumlu /chat/completions çağrısı + toleranslı JSON çözümleme
 │   ├── MailProcessor.cs    # Kural + AI birleşimi, alarm, webhook
 │   ├── ScanWorker.cs       # Arka planda periyodik tarama
 │   └── Stores.cs           # JSON dosya tabanlı saklama
@@ -101,7 +105,7 @@ src/MailDemon/
 
 ## Geliştirme fikirleri
 
-- Outlook'ta kategori veya bayrak ekleme (`Mail.ReadWrite` izni ile)
-- Graph **change notifications** (webhook) ile anlık bildirim
+- Outlook'ta kategori veya bayrak ekleme (COM ile `item.Categories`)
+- Outlook `NewMailEx` olayı ile anlık tetikleme
+- Windows başlangıcında otomatik çalıştırma (Görev Zamanlayıcı, "kullanıcı oturum açtığında")
 - Günlük özet maili, ya da istekleri Microsoft To Do / Planner'a görev olarak ekleme
-- Windows Service olarak çalıştırma (`UseWindowsService()`)

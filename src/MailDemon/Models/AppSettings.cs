@@ -36,34 +36,20 @@ public class AppSettings
     public List<string> IgnoredSenders { get; set; } = ["noreply@*", "no-reply@*"];
 }
 
-public enum MailboxAuthMode
-{
-    /// <summary>Kişisel / kurumsal hesap, cihaz kodu ile tek seferlik oturum açma (delegated Mail.Read).</summary>
-    DeviceCode,
-
-    /// <summary>Azure AD uygulama kaydı + client secret (application Mail.Read, yönetici onayı gerekir).</summary>
-    ClientSecret,
-}
-
+/// <summary>Bilgisayardaki Outlook masaüstü uygulamasından okuma ayarları.</summary>
 public class MailboxSettings
 {
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public MailboxAuthMode AuthMode { get; set; } = MailboxAuthMode.DeviceCode;
+    /// <summary>
+    /// Taranacak klasör. Boş ise varsayılan Gelen Kutusu.
+    /// Alt klasör için Gelen Kutusu'na göre yol: "Projeler" veya "Projeler/2026".
+    /// </summary>
+    public string Folder { get; set; } = "";
 
-    /// <summary>Kurumsal hesap için tenant id; kişisel Outlook.com için "common" veya "consumers".</summary>
-    public string TenantId { get; set; } = "common";
-
-    /// <summary>Azure portalındaki uygulama kaydının (App registration) Application (client) ID'si.</summary>
-    public string ClientId { get; set; } = "";
-
-    /// <summary>Sadece ClientSecret modunda kullanılır.</summary>
-    public string ClientSecret { get; set; } = "";
-
-    /// <summary>ClientSecret modunda okunacak posta kutusu (ör. ahmet@firma.com).</summary>
-    public string UserEmail { get; set; } = "";
-
-    /// <summary>Taranacak klasör. Graph'ın iyi bilinen adları: inbox, archive...</summary>
-    public string Folder { get; set; } = "inbox";
+    /// <summary>
+    /// Outlook'ta birden fazla hesap varsa taranacak hesabın adresi (ör. ahmet@firma.com).
+    /// Boş ise varsayılan hesap.
+    /// </summary>
+    public string Account { get; set; } = "";
 }
 
 public class IdentitySettings
@@ -101,17 +87,49 @@ public class ScanSettings
     public bool SkipIrrelevant { get; set; } = true;
 }
 
+public enum AiJsonMode
+{
+    /// <summary>response_format = json_schema (OpenAI, Azure OpenAI, vLLM yeni sürümler).</summary>
+    JsonSchema,
+
+    /// <summary>response_format = json_object (çoğu OpenAI uyumlu sunucu destekler).</summary>
+    JsonObject,
+
+    /// <summary>response_format gönderilmez; JSON sadece talimatla istenir.</summary>
+    None,
+}
+
+/// <summary>OpenAI uyumlu (/chat/completions) şirket içi AI servisi.</summary>
 public class AiSettings
 {
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Boş ise ANTHROPIC_API_KEY ortam değişkeni kullanılır.</summary>
+    /// <summary>
+    /// Ör. "https://ai.firma.local/v1". Sonuna /chat/completions eklenir.
+    /// Adres zaten /chat/completions içeriyorsa (Azure OpenAI gibi) olduğu gibi kullanılır.
+    /// </summary>
+    public string BaseUrl { get; set; } = "";
+
+    /// <summary>Token. Boş ise AI_API_KEY ortam değişkeni kullanılır.</summary>
     public string ApiKey { get; set; } = "";
 
-    public string Model { get; set; } = "claude-opus-5-5";
+    /// <summary>
+    /// Token'ın gönderileceği başlık. "Authorization" ise "Bearer {token}" olarak gönderilir;
+    /// başka bir ad (ör. Azure için "api-key") ise token olduğu gibi gönderilir.
+    /// </summary>
+    public string AuthHeader { get; set; } = "Authorization";
 
-    /// <summary>low / medium / high — düşük değer daha hızlı ve ucuz.</summary>
-    public string Effort { get; set; } = "medium";
+    public string Model { get; set; } = "";
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AiJsonMode JsonMode { get; set; } = AiJsonMode.JsonObject;
+
+    /// <summary>Boş bırakılırsa gönderilmez (bazı modeller temperature kabul etmez).</summary>
+    public double? Temperature { get; set; } = 0.1;
+
+    public int MaxTokens { get; set; } = 2000;
+
+    public int TimeoutSeconds { get; set; } = 120;
 
     /// <summary>AI'a ekstra talimatlar (serbest metin), ör. "Fatura onayı isteyen mailler en az Yüksek olsun".</summary>
     public string ExtraInstructions { get; set; } = "";

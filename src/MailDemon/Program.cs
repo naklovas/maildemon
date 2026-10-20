@@ -30,21 +30,19 @@ app.MapGet("/api/settings", (SettingsStore store) =>
     var s = store.Read();
     // Gizli değerleri tarayıcıya göndermiyoruz.
     if (s.Ai.ApiKey != "") s.Ai.ApiKey = Mask;
-    if (s.Mailbox.ClientSecret != "") s.Mailbox.ClientSecret = Mask;
     return s;
 });
 
-app.MapPut("/api/settings", (AppSettings incoming, SettingsStore store, OutlookClient outlook, ScanWorker worker) =>
+app.MapPut("/api/settings", (AppSettings incoming, SettingsStore store, ScanWorker worker) =>
 {
     var current = store.Read();
     if (incoming.Ai.ApiKey == Mask) incoming.Ai.ApiKey = current.Ai.ApiKey;
-    if (incoming.Mailbox.ClientSecret == Mask) incoming.Mailbox.ClientSecret = current.Mailbox.ClientSecret;
     incoming.Scan.IntervalMinutes = Math.Clamp(incoming.Scan.IntervalMinutes, 1, 1440);
     incoming.Scan.MaxMailsPerScan = Math.Clamp(incoming.Scan.MaxMailsPerScan, 1, 200);
     incoming.Ai.MaxBodyChars = Math.Clamp(incoming.Ai.MaxBodyChars, 500, 100_000);
+    incoming.Ai.MaxTokens = Math.Clamp(incoming.Ai.MaxTokens, 100, 100_000);
 
     store.Write(incoming);
-    outlook.Reset();
     worker.TriggerNow();
     return Results.Ok();
 });
@@ -55,12 +53,10 @@ app.MapGet("/api/status", (SettingsStore settings, AnalysisStore store, OutlookC
 {
     var s = settings.Read();
     var warnings = new List<string>();
-    if (string.IsNullOrWhiteSpace(s.Mailbox.ClientId))
-        warnings.Add("Outlook bağlantısı için Client ID girilmemiş (Ayarlar > Outlook).");
-    if (s.Me.Emails.Count == 0)
+    if (s.Me.Emails.Count == 0 && outlook.DetectedEmails.Count == 0)
         warnings.Add("E-posta adresiniz girilmemiş; maillerin size gelip gelmediği anlaşılamaz (Ayarlar > Kimliğim).");
-    if (s.Ai.Enabled && s.Ai.ApiKey == "" && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")))
-        warnings.Add("Anthropic API anahtarı yok (Ayarlar > AI).");
+    if (s.Ai.Enabled && (string.IsNullOrWhiteSpace(s.Ai.BaseUrl) || string.IsNullOrWhiteSpace(s.Ai.Model)))
+        warnings.Add("AI servis adresi veya model adı girilmemiş (Ayarlar > AI).");
 
     return new
     {
@@ -69,7 +65,7 @@ app.MapGet("/api/status", (SettingsStore settings, AnalysisStore store, OutlookC
         worker.NextScanAt,
         LastScanAt = store.Query(st => st.LastScanAt),
         outlook.SignedInAs,
-        DeviceCodeMessage = outlook.PendingDeviceCodeMessage,
+        outlook.DetectedEmails,
         Warnings = warnings,
     };
 });
@@ -80,9 +76,9 @@ app.MapPost("/api/scan", (ScanWorker worker) =>
     return Results.Accepted();
 });
 
-app.MapPost("/api/outlook/signout", (OutlookClient outlook) =>
+app.MapPost("/api/analyses/{id}/open", async (string id, OutlookClient outlook) =>
 {
-    outlook.SignOut();
+    await outlook.OpenAsync(id);
     return Results.Ok();
 });
 

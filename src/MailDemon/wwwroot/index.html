@@ -117,6 +117,14 @@ async function setStatus(id, status) {
   loadAlerts();
 }
 
+async function openInOutlook(id) {
+  try {
+    await api("POST", `/api/analyses/${encodeURIComponent(id)}/open`);
+  } catch (e) {
+    alert("Outlook'ta açılamadı: " + e.message);
+  }
+}
+
 async function reanalyze(id) {
   await api("POST", `/api/analyses/${encodeURIComponent(id)}/reanalyze`);
   loadList();
@@ -152,7 +160,7 @@ async function loadList() {
       ${m.matchedRules?.length ? `<div style="margin-top:4px">${m.matchedRules.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>` : ""}
       ${m.aiNote ? `<div class="reason">ℹ️ ${esc(m.aiNote)}</div>` : ""}
       <div class="actions">
-        ${m.webLink ? `<a class="btn" style="text-decoration:none;font-size:12px;padding:3px 9px" href="${esc(m.webLink)}" target="_blank" rel="noopener">Outlook'ta aç</a>` : ""}
+        ${m.id.startsWith("test-") ? "" : `<button class="small" onclick="openInOutlook('${esc(m.id)}')">📧 Outlook'ta aç</button>`}
         ${m.status === "New"
           ? `<button class="small" onclick="setStatus('${esc(m.id)}','Done')">✔ Tamamlandı</button>
              <button class="small secondary" onclick="setStatus('${esc(m.id)}','Dismissed')">Gizle</button>`
@@ -165,7 +173,6 @@ async function loadList() {
 async function tick() {
   const st = await refreshHeaderStatus();
   const banners = [];
-  if (st?.deviceCodeMessage) banners.push(`<div class="banner info">🔑 <b>Outlook girişi gerekiyor:</b> ${esc(st.deviceCodeMessage)}</div>`);
   if (st?.lastError) banners.push(`<div class="banner error">⚠️ Son tarama hatası: ${esc(st.lastError)}</div>`);
   (st?.warnings ?? []).forEach(w => banners.push(`<div class="banner warn">${esc(w)} <a href="settings.html">Ayarlara git</a></div>`));
   document.getElementById("banners").innerHTML = banners.join("");
